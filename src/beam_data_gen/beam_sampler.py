@@ -8,6 +8,8 @@ from assembly_tools.ramp_graph import RampGraph
 class BeamSampler:
     def __init__(self, trans_lims: np.array):
         self._trans_lims = trans_lims
+        # Pose dict 
+        self._node_pose_dict = None
     
     def uniform_pose_sampler(self):
         trans = np.array(list(np.random.uniform(-self._trans_lims[k], self._trans_lims[k]) for k in range(3)))
@@ -29,4 +31,12 @@ class BeamSampler:
                 # Sample a transform
                 data["pose"].trans += trans
                 data["pose"].orient = R.from_matrix(np.matmul(rot.as_matrix(), data["pose"].orient.as_matrix())) 
-        return                
+        return
+    
+    def graph_to_joint_angles(self, ramp_graph: RampGraph):
+        nodes_data = ramp_graph.node_lst
+        for (node, data) in nodes_data:
+            self._node_pose_dict[node] = data["pose"]
+        return self._node_pose_dict
+            
+            

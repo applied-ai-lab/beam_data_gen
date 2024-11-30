@@ -5,10 +5,8 @@ import mujoco
 from mujoco import MjModel, MjData
 import mujoco.viewer
 
-
-# # Load the MuJoCo model
-# model = MjModel.from_xml_path("scene.xml")
-# data = MjData(model)
+from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected)
+from beam_data_gen.beam_sampler import BeamSampler
 
 # Function to check for collisions
 def check_collisions(data):
@@ -27,6 +25,20 @@ def check_collisions(data):
 m = mujoco.MjModel.from_xml_path('resources/configs/three_beams.xml')
 d = mujoco.MjData(m)
 
+# Initialise the classes
+trans_lims = [0.3, 0.3, 0.0]
+sampler = BeamSampler(trans_lims)
+
+sample_fun = sampler.uniform_pose_sampler
+
+# Beam config graph
+graph = l_pin_removed
+
+# Init poses
+pose_dict = sampler.graph_to_pose_dict(l_pin_removed)
+
+# Convert pose dict to joint angles
+
 with mujoco.viewer.launch_passive(m, d) as viewer:
   start = time.time()
   while viewer.is_running():
@@ -36,9 +48,6 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
     # mj_step can be replaced with code that also evaluates
     # a policy and applies a control signal before stepping the physics.
     mujoco.mj_step(m, d)
-    
-    import pdb
-    pdb.set_trace()
 
     # Check for collisions
     if check_collisions(d):

@@ -1,0 +1,37 @@
+<mujoco model="three_beams">
+    <option timestep="0.01" gravity="0 0 -9.81"/>
+
+    <!-- Define default material and visual properties -->
+    <visual>
+        <global offwidth="800" offheight="600"/>
+    </visual>
+
+    <asset>
+        <!-- Define beam material -->
+        <texture name="beam_tex" type="cube" builtin="flat" width="256" height="256" rgb1="0.8 0.3 0.3" rgb2="0.8 0.8 0.8"/>
+        <material name="beam_mat" texture="beam_tex" reflectance="0.3"/>
+    </asset>
+
+    <worldbody>
+        <!-- Add ground plane -->
+        <geom name="ground" type="plane" size="10 10 0.1" rgba="0.6 0.9 0.6 1"/>
+
+        <!-- Beam 1 quaternion order is [w x y z] -->
+        <body name="beam1" pos="0 0 0.04" quat="1 0 0 0"> 
+            <freejoint />
+            <geom name="beam1_geom" type="box" size="0.316 0.021 0.021" rgba="1 0 0 1" material="beam_mat"/>
+        </body>
+
+        <!-- Beam 2 -->
+        <body name="beam2" pos="0.316 0.277 0.04" quat="0.707 0 0 0.707">
+            <freejoint />
+            <geom name="beam2_geom" type="box" size="0.277 0.021 0.021" rgba="0 1 0 1" material="beam_mat"/>
+        </body>
+
+        <!-- Pin -->
+        <body name="beam3" pos="0.316 0.0 0.08" quat="0.707 0.707 0 0">
+            <freejoint />
+            <geom name="beam3_geom" type="box" size="0.021 0.021 0.021" rgba="0 0 1 1" material="beam_mat"/>
+        </body>
+    </worldbody>
+</mujoco>

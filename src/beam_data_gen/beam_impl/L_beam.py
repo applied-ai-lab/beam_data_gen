@@ -17,15 +17,15 @@ class L_BeamParams(LGraph):
             self._node_dict = {
                 self._id + "_beam_1": {'type': BeamTypeEnum.BEAM, 
                                        'pose': PoseType(trans=np.array([0.000, 0.000, 0.04]), orient=R.from_quat([0, 0, 0, 1])),
-                                       '_l_p': PoseType(trans=np.array([0.000, 0.000, 0.00]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
+                                       '_l_p': PoseType(trans=np.array([0.000, 0.000, 0.04]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
                                        },
                 self._id + "_beam_2": {'type': BeamTypeEnum.BEAM, 
                                        'pose': PoseType(trans=np.array([0.316, 0.277, 0.04]), orient=R.from_quat([0, 0, 0.707, 0.707])),
-                                       '_l_p': PoseType(trans=np.array([0.316, 0.277, 0.00]), orient=R.from_quat([0, 0, 0.707, 0.707])) # Local pose
+                                       '_l_p': PoseType(trans=np.array([0.316, 0.277, 0.04]), orient=R.from_quat([0, 0, 0.707, 0.707])) # Local pose
                                        },
                 self._id + "_pin_A":  {'type': BeamTypeEnum.PIN , 
                                        'pose': PoseType(trans=np.array([0.316, 0.000, 0.08]), orient=R.from_quat([0, 0, 0.707, 0.707])),
-                                       '_l_p': PoseType(trans=np.array([0.316, 0.000, 0.04]), orient=R.from_quat([0, 0, 0.707, 0.707])) # Local pose
+                                       '_l_p': PoseType(trans=np.array([0.316, 0.000, 0.08]), orient=R.from_quat([0, 0, 0.707, 0.707])) # Local pose
                                        },
             }
         return self._node_dict

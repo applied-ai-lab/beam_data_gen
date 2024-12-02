@@ -19,19 +19,19 @@
         <!-- Beam 1 quaternion order is [w x y z] -->
         <body name="beam1" pos="0 0 0.04" quat="1 0 0 0"> 
             <freejoint />
-            <geom name="beam1_geom" type="box" size="0.316 0.021 0.021" rgba="1 0 0 1" material="beam_mat"/>
+            <geom name="l_beam_1" type="box" size="0.316 0.021 0.021" rgba="1 0 0 1" material="beam_mat"/>
         </body>
 
         <!-- Beam 2 -->
         <body name="beam2" pos="0.316 0.277 0.04" quat="0.707 0 0 0.707">
             <freejoint />
-            <geom name="beam2_geom" type="box" size="0.277 0.021 0.021" rgba="0 1 0 1" material="beam_mat"/>
+            <geom name="l_beam_2" type="box" size="0.277 0.021 0.021" rgba="0 1 0 1" material="beam_mat"/>
         </body>
 
         <!-- Pin -->
-        <body name="beam3" pos="0.316 0.0 0.08" quat="0.707 0.707 0 0">
+        <body name="pinA" pos="0.316 0.0 0.08" quat="0.707 0 0 0.707">
             <freejoint />
-            <geom name="beam3_geom" type="box" size="0.021 0.021 0.021" rgba="0 0 1 1" material="beam_mat"/>
+            <geom name="l_pin_A" type="box" size="0.021 0.021 0.021" rgba="0 0 1 1" material="beam_mat"/>
         </body>
     </worldbody>
 </mujoco>

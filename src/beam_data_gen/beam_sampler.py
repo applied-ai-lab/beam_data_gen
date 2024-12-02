@@ -9,7 +9,7 @@ class BeamSampler:
     def __init__(self, trans_lims: np.array):
         self._trans_lims = trans_lims
         # Pose dict 
-        self._node_pose_dict = None
+        self._node_pose_dict = {}
     
     def uniform_pose_sampler(self):
         trans = np.array(list(np.random.uniform(-self._trans_lims[k], self._trans_lims[k]) for k in range(3)))
@@ -29,11 +29,12 @@ class BeamSampler:
             trans, rot = samp_func()
             for (node, data) in node_lst:
                 # Sample a transform
-                data["pose"].trans += trans
-                data["pose"].orient = R.from_matrix(np.matmul(rot.as_matrix(), data["pose"].orient.as_matrix())) 
+                # data["pose"].trans += trans + np.matmul(np.matmul(rot.as_matrix(), data["_l_p"].orient.as_matrix()), data["_l_p"].trans)
+                data["pose"].orient = R.from_matrix(np.matmul(rot.as_matrix(), data["_l_p"].orient.as_matrix()))
+                data["pose"].trans = trans + np.matmul(data["pose"].orient.as_matrix(), np.matmul(data["_l_p"].orient.as_matrix(), data["_l_p"].trans))
         return
     
-    def graph_to_joint_angles(self, ramp_graph: RampGraph):
+    def graph_to_pose_dict(self, ramp_graph: RampGraph):
         nodes_data = ramp_graph.node_lst
         for (node, data) in nodes_data:
             self._node_pose_dict[node] = data["pose"]

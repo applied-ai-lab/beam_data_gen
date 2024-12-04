@@ -22,15 +22,13 @@ def test_vae():
     inputs = BeamVaeInputs()
     inputs.x_in = torch.zeros([batch_size, beam_params.state_dim * 3], device=beam_params.device)
     inputs.x_out = torch.ones([batch_size, beam_params.state_dim * 3], device=beam_params.device)
-    inputs.graph_edge_targets = torch.zeros([batch_size, beam_params.no_classifier_nodes, beam_params.no_classifier_nodes], device=beam_params.device)
+    inputs.graph_edge_targets = torch.ones([batch_size, beam_params.no_classifier_nodes, beam_params.no_classifier_nodes], device=beam_params.device)
     
     # Model forward pass
     latents, outputs = model.forward(inputs)
     
     # Test loss function
     loss = model.loss_func(inputs, latents, outputs)
-    
-    import pdb; pdb.set_trace()
     
     return 0
 

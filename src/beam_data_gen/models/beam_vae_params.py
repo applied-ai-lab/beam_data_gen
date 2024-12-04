@@ -12,7 +12,7 @@ class BeamVaeParams(VaeParams):
         
         self.action_dim = 0 # Action size
 
-        self.state_dim = 4 # State space dimension of the robot
+        self.state_dim = 5 # State space dimension of the robot
 
         self.no_inputs = 1
         self.no_outputs = 1
@@ -46,8 +46,7 @@ class BeamVaeParams(VaeParams):
         
         self.action_dim = args.action_dim
         self.no_classifier_nodes = args.no_classifier_nodes
-        self.state_dim_in = args.state_dim_in
-        self.state_dim_out = args.state_dim_out
+        self.state_dim = args.state_dim
         self.in_path = args.in_path
         self.out_dir = args.out_dir
         self.no_inputs = args.no_inputs

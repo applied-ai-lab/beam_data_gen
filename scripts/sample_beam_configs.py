@@ -52,7 +52,7 @@ def main():
     d = mujoco.MjData(m)
 
     # Initialise the classes
-    trans_lims = [0.3, 0.3, 0.0]
+    trans_lims = [0.6, 0.6, 0.0]
     sampler = BeamSampler(trans_lims)
 
     # Beam config graph
@@ -66,7 +66,7 @@ def main():
             datasaver = DataSaver(graph)
 
             counter = 0
-            max_iters = 1000
+            max_iters = 5000
             
             # Start loop and sample pose
             while viewer.is_running() and counter < max_iters:

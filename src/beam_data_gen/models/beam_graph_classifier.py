@@ -23,8 +23,8 @@ class BeamGraphClassifier(Classifier):
         return edge_pred
     
     def loss_func(self, edge_logits: torch.tensor, edge_targets: torch.tensor):
-        target_up = torch.triu(edge_targets)
-        output_up = torch.triu(edge_logits)        
+        target_up = torch.triu(edge_targets, diagonal=1)
+        output_up = torch.triu(edge_logits, diagonal=1)        
                 
         return self._loss(output_up, target_up)
     

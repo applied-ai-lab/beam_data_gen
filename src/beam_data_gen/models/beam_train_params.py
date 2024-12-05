@@ -11,7 +11,7 @@ class TrainParams:
         self.lr           = 1.0e-3
         # loss params:
         self.kl = 0.2
-        self.bce = 1.0e+3
+        self.bce = 0.1
         self.gce = 0.5
         self.vce = 0.0
         self.reduction = 'sum'

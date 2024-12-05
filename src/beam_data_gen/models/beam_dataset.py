@@ -33,7 +33,7 @@ class ProcessData:
         
         pos_lim = torch.tensor(self._pos_lims, dtype=x_pred.dtype, device=x_pred.device)
         
-        x_denorm = copy.deepcopy(x_pred)
+        x_denorm = x_pred
         for k in range(3):
             
             x_denorm[:, state_dim*k : state_dim*k + 3] *= pos_lim

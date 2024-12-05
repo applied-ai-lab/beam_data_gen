@@ -26,5 +26,5 @@ class BeamGraphClassifier(Classifier):
         target_up = torch.triu(edge_targets, diagonal=1)
         output_up = torch.triu(edge_logits, diagonal=1)        
                 
-        return self._loss(output_up, target_up)
+        return F.binary_cross_entropy_with_logits(output_up, target_up, reduction="sum")
     

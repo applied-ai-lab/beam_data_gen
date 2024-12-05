@@ -25,8 +25,21 @@ class ProcessData:
         
         rot = R.from_quat(quat)
         # Theta z
-        theta_z = rot.as_euler(seq="xyz")[:, 2]        
-        return np.hstack([pos, np.sin(theta_z).reshape(-1, 1), np.cos(theta_z).reshape(-1, 1)])
+        theta_z = rot.as_euler(seq="xyz")[:, 2] / (2.0 * np.pi)
+        return np.hstack([pos, theta_z.reshape(-1, 1)])
+    
+    def denorm_output(self, x_pred: torch.tensor):
+        state_dim = 4
+        
+        pos_lim = torch.tensor(self._pos_lims, dtype=x_pred.dtype, device=x_pred.device)
+        
+        x_denorm = copy.deepcopy(x_pred)
+        for k in range(3):
+            
+            x_denorm[:, state_dim*k : state_dim*k + 3] *= pos_lim
+            x_denorm[:, state_dim*k + 3] *= (2.0 * np.pi)
+            
+        return x_denorm        
      
     def __call__(self, dir_path, beam_names):
         pd_file_lst = self.load_data(dir_path)
@@ -87,7 +100,7 @@ class BeamDataset(Dataset):
 if __name__ == "__main__":
     path = "data/graphs/"
     
-    process_data = ProcessData(np.array([0.3, 0.3, 0.08]))
+    process_data = ProcessData(np.array([0.6, 0.6, 0.08]))
     poses, adj = process_data(path, ["l_beam_1", "l_beam_2", "l_pin_A"])
     
     # Data loader

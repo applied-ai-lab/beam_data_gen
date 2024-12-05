@@ -9,6 +9,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 from vae_planner.argparse_yaml_loader.yaml_loader import YamlLoader
+from vae_planner.models.encoder_base import EncoderBase
+
 from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.beam_train_params import TrainParams
@@ -96,7 +98,7 @@ def main():
     
     ##########################################
     # Process data
-    process_data = ProcessData(np.array([0.3, 0.3, 0.08]))
+    process_data = ProcessData(np.array([0.6, 0.6, 0.08]))
     poses, flat_adj = process_data(train_params.data_path, ["l_beam_1", "l_beam_2", "l_pin_A"])
 
     # Create dataset and dataloaders
@@ -106,11 +108,11 @@ def main():
     # Split training and test
     train_dataset, test_dataset = torch.utils.data.random_split(dataset_class, [0.8, 0.2])
     train_dataloader = DataLoader(train_dataset, batch_size=train_params.batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=train_params.batch_size)
+    test_dataloader = DataLoader(test_dataset, batch_size=train_params.batch_size, shuffle=True)
 
     model = BeamVae(vae_params, 
                     train_params,
-                    BeamEncoder,
+                    EncoderBase,
                     BeamDecoder,
                     BeamGraphClassifier).to(vae_params.device)
     

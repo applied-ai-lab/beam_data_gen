@@ -25,11 +25,11 @@ class ProcessData:
         
         rot = R.from_quat(quat)
         # Theta z
-        theta_z = rot.as_euler(seq="xyz")[:, 2] / (2.0 * np.pi)
-        return np.hstack([pos, theta_z.reshape(-1, 1)])
+        theta_z = rot.as_euler(seq="xyz")[:, 2]
+        return np.hstack([pos, np.sin(theta_z).reshape(-1, 1), np.cos(theta_z).reshape(-1, 1)])
     
     def denorm_output(self, x_pred: torch.tensor):
-        state_dim = 4
+        state_dim = 5
         
         pos_lim = torch.tensor(self._pos_lims, dtype=x_pred.dtype, device=x_pred.device)
         
@@ -37,7 +37,9 @@ class ProcessData:
         for k in range(3):
             
             x_denorm[:, state_dim*k : state_dim*k + 3] *= pos_lim
-            x_denorm[:, state_dim*k + 3] *= (2.0 * np.pi)
+            # x_denorm[:, state_dim*k + 3] = torch.atan2(x_pred[:, state_dim*k + 3].min(torch.ones([1], dtype=x_pred.dtype, device=x_pred.device)).max(-torch.ones([1], dtype=x_pred.dtype, device=x_pred.device)), x_pred[:, state_dim*k + 4].min(1.0).max(-1.0))
+            x_denorm[:, state_dim*k + 3] = torch.atan2(x_pred[:, state_dim*k + 3], x_pred[:, state_dim*k + 4])
+            x_denorm[:, state_dim*k + 4] = torch.atan2(x_pred[:, state_dim*k + 3], x_pred[:, state_dim*k + 4])
             
         return x_denorm        
      

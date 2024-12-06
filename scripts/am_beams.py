@@ -3,6 +3,7 @@ import time
 
 import torch
 import numpy as np
+from matplotlib import pyplot as plt
 import mujoco
 import mujoco.viewer
 from scipy.spatial.transform import Rotation as R
@@ -47,8 +48,10 @@ def main():
     d = mujoco.MjData(m)
     
     latents.z = 1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
+    latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)
+    grad_list = []
     
     out_pred = model.decoder(latents, None)
     out_graph = model.classifier(latents.z)
@@ -79,9 +82,10 @@ def main():
                 
                 # Graph features
                 grad_features = grad(outputs=loss, inputs=latents.z, retain_graph=True)[0]
-                print(grad_features)
+                grad_list.append(grad_features.detach().cpu().numpy().squeeze())
                     
                 latents.z = latents.z - 1.0e-3 * grad_features
+                latent_list.append(latents.z.detach().cpu().numpy().squeeze())
                 
                 out_pred = model.decoder(latents, None)
                 out_graph = model.classifier(latents.z)
@@ -114,6 +118,12 @@ def main():
                 
                 # Rudimentary time keeping, will drift relative to wall clock.
                 time.sleep(0.1)
+            
+            # Stack gradients
+            gradient_traj = np.vstack(grad_list)
+            latent_traj = np.vstack(latent_list)
+            
+            import pdb; pdb.set_trace()
 
 
     return 0

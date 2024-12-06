@@ -21,6 +21,8 @@ from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
                                               BeamDecoder, BeamGraphClassifier)
+from beam_data_gen.latent_space.latent_inspector import BeamLSInspector
+
 
 def main():
         
@@ -42,6 +44,29 @@ def main():
     
     model.load_state_dict(torch.load(vae_params.in_path))
     
+    
+    # Inspect Latent Space
+    latent_inspector = BeamLSInspector(model, vae_params)
+    
+    # Load test data
+    process_data = ProcessData(vae_params.pos_lims)
+    poses, flat_adj = process_data(train_params.data_path, ["l_beam_1", "l_beam_2", "l_pin_A"])
+    
+    no_inputs = 1000
+    rand_indices = np.random.choice(poses.shape[0], size=no_inputs)
+      
+    
+    # Model inputs
+    model_inputs = BeamVaeInputs()
+    model_inputs.x_in = torch.tensor(poses[rand_indices, :], dtype=torch.float32).to(vae_params.device)
+    model_inputs.graph_edge_targets = torch.tensor(flat_adj[rand_indices, :].reshape(-1, 
+                                                                    vae_params.no_classifier_nodes, 
+                                                                    vae_params.no_classifier_nodes), 
+                                                    dtype=torch.float32).to(vae_params.device) 
+
+    (latent_dims, mean_var) = latent_inspector.find_latent_dims(model_inputs)
+        
+    # AM for ls
     latents = LatentVarsBase()
     
     m = mujoco.MjModel.from_xml_path('resources/configs/three_beams.xml')

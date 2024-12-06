@@ -7,8 +7,8 @@ action_dim               : 0
 state_dim                : 5
 no_inputs                : 3
 no_outputs               : 1
-in_path                  : "model_params/base_encoder/vae_3/vae_epoch_1600.pt"
-out_dir                  : "model_params/base_encoder/vae_3" 
+in_path                  : "model_params/base_encoder/vae_4/vae_epoch_10000.pt"
+out_dir                  : "model_params/base_encoder/vae_4" 
 data_freq                : 50.0
 enc_freq                 : 50.0 
 dec_freq                 : 50.0
@@ -16,3 +16,10 @@ no_recurrent_steps       : 1
 model_width              : 128 
 batch_first              : True 
 cuda                     : True
+
+
+# Beam Params
+pos_lims:
+    - 0.60
+    - 0.60
+    - 0.08  

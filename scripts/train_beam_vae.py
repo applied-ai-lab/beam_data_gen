@@ -98,7 +98,7 @@ def main():
     
     ##########################################
     # Process data
-    process_data = ProcessData(np.array([0.6, 0.6, 0.08]))
+    process_data = ProcessData(np.array(vae_params.pos_lims))
     poses, flat_adj = process_data(train_params.data_path, ["l_beam_1", "l_beam_2", "l_pin_A"])
 
     # Create dataset and dataloaders

@@ -26,7 +26,7 @@ def main():
     vae_params = BeamVaeParams(vae_args)
     train_params = TrainParams(train_args)
     
-    data_processor = ProcessData(np.array([0.6, 0.6, 0.08]))
+    data_processor = ProcessData(np.array(vae_args.pos_lims))
     
     with torch.no_grad():
         model = BeamVae(vae_params, 

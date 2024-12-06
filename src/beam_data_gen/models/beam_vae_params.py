@@ -17,6 +17,8 @@ class BeamVaeParams(VaeParams):
         self.no_inputs = 1
         self.no_outputs = 1
         
+        self.pos_lims = [0.60, 0.60, 0.08]
+        
         self.no_classifier_nodes = 3 # self.no_classifier_pred = self.no_classifier_nodes**2
 
         self.in_path = ""
@@ -43,6 +45,8 @@ class BeamVaeParams(VaeParams):
         
         self.beam_latent_dim = args.beam_latent_dim
         self.no_beams = args.no_beams
+        
+        self.pos_lims = args.pos_lims
         
         self.action_dim = args.action_dim
         self.no_classifier_nodes = args.no_classifier_nodes

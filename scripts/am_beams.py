@@ -43,6 +43,7 @@ def main():
                 BeamGraphClassifier).to(vae_params.device)
     
     model.load_state_dict(torch.load(vae_params.in_path))
+    print(vae_params.in_path)
     
     
     # Inspect Latent Space
@@ -65,6 +66,22 @@ def main():
                                                     dtype=torch.float32).to(vae_params.device) 
 
     (latent_dims, mean_var) = latent_inspector.find_latent_dims(model_inputs)
+    
+    # Sample from 2d circle
+    no_samps = 1000
+    x, y = latent_inspector.sample_latent_values_from_unit_circle_2d(radius=2.5, no_samps=no_samps)
+    
+    latents_for_plotting = LatentVarsBase()
+    latents_for_plotting.z = torch.zeros([no_samps, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device)
+    
+    print(latent_dims)
+    
+    latents_for_plotting.z[:, latent_dims[0]] = x
+    latents_for_plotting.z[:, latent_dims[1]] = y
+
+    # Classify the graphs      
+    graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
+    latent_inspector.plot_latents(x, y, graphs_for_plotting)
         
     # AM for ls
     latents = LatentVarsBase()
@@ -72,7 +89,7 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/three_beams.xml')
     d = mujoco.MjData(m)
     
-    latents.z = 1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
+    latents.z = 2.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
     latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)
@@ -87,7 +104,7 @@ def main():
     graph_target = torch.tensor([l_connected_graph.A], dtype=torch.float32)
     graph_target = graph_target.to(vae_params.device)
     
-    termination_criteria = 0.5     
+    termination_criteria = 0.05     
     
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:

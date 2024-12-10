@@ -4,12 +4,12 @@ read_from_file    : False
 output_to_file    : True
 data_path         : "data/graphs/"
 batch_size        : 256
-epochs            : 100000
+epochs            : 10000
 seed              : 42
 log_interval      : 10
 lr                : 1.0e-3
-kl                : 1.0
-bce               : 1.0e+3
+kl                : 2.0
+bce               : 1.0e+5
 gce               : 0.0
 vce               : 0.0
 reduction         : "sum"

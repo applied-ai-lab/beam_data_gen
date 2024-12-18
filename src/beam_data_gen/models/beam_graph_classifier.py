@@ -15,10 +15,10 @@ class BeamGraphClassifier(Classifier):
         
         # Classifier weights
         self._loss_weights = torch.tensor([[0., 1., 1.], 
-                                           [0., 0., 1.], 
-                                           [0., 0., 0.]]).to(self.vae_params.device)
+                                           [1., 0., 1.], 
+                                           [1., 1., 0.]]).to(self.vae_params.device)
         
-        self._loss_crit = nn.CrossEntropyLoss()
+        self._loss_crit = nn.BCEWithLogitsLoss(weight=self._loss_weights, reduction="sum")
         
     def forward(self, inputs: torch.tensor):
         logits = self.class_mlp(inputs)
@@ -27,6 +27,7 @@ class BeamGraphClassifier(Classifier):
                                          self.vae_params.no_classifier_nodes, 
                                          self.vae_params.no_classifier_nodes)
         edge_pred = 0.5 * (logits_reshaped.transpose(1, 2) + logits_reshaped)
+        edge_pred = edge_pred * (1 - torch.eye(edge_pred.shape[1], edge_pred.shape[1]).repeat(edge_pred.shape[0], 1, 1)).to(self.vae_params.device)
         return edge_pred
     
     def loss_func(self, edge_logits: torch.tensor, edge_targets: torch.tensor):    

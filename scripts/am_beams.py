@@ -2,6 +2,7 @@ import argparse
 import time
 
 import torch
+from torch import nn
 import numpy as np
 from matplotlib import pyplot as plt
 import mujoco
@@ -101,10 +102,24 @@ def main():
     denorm_out = data_processor.denorm_output(out_pred.x_pred)
     
     # Graph Target
-    graph_target = torch.tensor([l_connected_graph.A], dtype=torch.float32)
+    adj_mat = l_pin_removed.A
+    graph_target = torch.tensor([adj_mat], dtype=torch.float32)
     graph_target = graph_target.to(vae_params.device)
     
-    termination_criteria = 0.05     
+    print(adj_mat)
+    print(torch.sigmoid(out_graph).round())
+    
+    # # Polar latents [R, theta]
+    # z_polar = torch.tensor([torch.sqrt(torch.square(latents.z[:, latent_dims[1]]) + 
+    #                                    torch.square(latents.z[:, latent_dims[0]])).item(),
+    #                         torch.atan2(latents.z[:, latent_dims[1]], latents.z[:, latent_dims[0]]).item()],
+    #                        dtype=torch.float32).requires_grad_()
+    
+    termination_criteria = 0.2
+    
+    loss_func = nn.BCEWithLogitsLoss()
+    
+    loss = loss_func(out_graph, graph_target)
     
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
@@ -115,10 +130,10 @@ def main():
         
         # Start loop and sample pose
         while viewer.is_running():
-            while torch.norm(grad_features) > termination_criteria:
-                # Loss
+            while torch.norm(loss) > termination_criteria:
+                # Loss                
                 out_graph = model._classifier.forward(latents.z)
-                loss = F.binary_cross_entropy_with_logits(out_graph, graph_target)
+                loss = loss_func(out_graph, graph_target)
                 
                 print(torch.sigmoid(out_graph).round())
                 
@@ -126,7 +141,7 @@ def main():
                 grad_features = grad(outputs=loss, inputs=latents.z, retain_graph=True)[0]
                 grad_list.append(grad_features.detach().cpu().numpy().squeeze())
                     
-                latents.z = latents.z - 1.0e-3 * grad_features
+                latents.z = latents.z - 1.0e-2 * grad_features
                 latent_list.append(latents.z.detach().cpu().numpy().squeeze())
                 
                 out_pred = model.decoder(latents, None)

@@ -57,5 +57,4 @@ class BeamLSInspector(LatentInspector):
             else:
                 axis.scatter(x_np[k], y_np[k], color=colour_list[k]["colour"])
         axis.legend()
-        plt.show()
-        return
+        return axis

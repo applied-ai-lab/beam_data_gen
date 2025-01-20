@@ -19,12 +19,12 @@ class RobotGraphParams(BeamBase):
         if self._node_dict is None:
             self._node_dict = {
                 self._id + "_left_hand": {'type': BeamTypeEnum.HAND, 
-                                       'pose': PoseType(trans=np.array([0.316, 0.277, 0.12]), orient=R.from_quat([0, 0, 0, 1])),
-                                       '_l_p': PoseType(trans=np.array([0.316, 0.277, 0.12]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
+                                       'pose': PoseType(trans=np.array([0.316, 0.277, 0.25]), orient=R.from_quat([0, 0, 0, 1])),
+                                       '_l_p': PoseType(trans=np.array([0.316, 0.277, 0.25]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
                                        },
                 self._id + "_right_hand": {'type': BeamTypeEnum.HAND, 
-                                       'pose': PoseType(trans=np.array([0.316, -0.277, 0.12]), orient=R.from_quat([0, 0, 0.707, 0.707])),
-                                       '_l_p': PoseType(trans=np.array([0.316, -0.277, 0.12]), orient=R.from_quat([0, 0, 0.707, 0.707])) # Local pose
+                                       'pose': PoseType(trans=np.array([0.316, -0.277, 0.25]), orient=R.from_quat([0, 0, 0, 1])),
+                                       '_l_p': PoseType(trans=np.array([0.316, -0.277, 0.25]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
                                        }
             }
         return self._node_dict
@@ -46,8 +46,18 @@ class RobotGraph(RampGraph):
                 # Check pose of the hand connected to the object
                 if self._graph.degree[node] == 1:
                     beam_nodes = list(self._graph.adj[node])
-                    data['pose'] = self._graph.nodes[beam_nodes[0]]['pose']
+                    data['pose'] = copy.deepcopy(self._graph.nodes[beam_nodes[0]]['pose'])
         return True         
+    
+    # Add hand
+    def add_hand(self, hand_node: str, beam_node: str = None):
+        self.remove_edge(hand_node)
+        # If beam node is None, remove hand connections
+        if beam_node is None:
+            self.remove_edge(hand_node)
+            return self.check_graph()
+        else:
+            return self.add_edge(hand_node, beam_node)
     
     # Add edge to graph
     def add_edge(self, node_0: str, node_1: str):

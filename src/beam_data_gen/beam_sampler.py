@@ -2,7 +2,7 @@ import networkx as nx
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from assembly_tools.ramp_graph import RampGraph
+from assembly_tools.ramp_graph import RampGraph, BeamTypeEnum
 
 
 class BeamSampler:
@@ -31,8 +31,10 @@ class BeamSampler:
                 # Sample a transform
                 # data["pose"].trans += trans + np.matmul(np.matmul(rot.as_matrix(), data["_l_p"].orient.as_matrix()), data["_l_p"].trans)
                 data["pose"].orient = R.from_matrix(np.matmul(rot.as_matrix(), data["_l_p"].orient.as_matrix()))
-                data["pose"].trans = trans + np.matmul(data["pose"].orient.as_matrix(), np.matmul(data["_l_p"].orient.as_matrix(), data["_l_p"].trans))
-        return
+                data["pose"].trans = trans + np.matmul(data["pose"].orient.as_matrix(), 
+                                                       np.matmul(data["_l_p"].orient.as_matrix(), data["_l_p"].trans))
+            # Check the graph is feasible
+        return ramp_graph.check_graph()
     
     def graph_to_pose_dict(self, ramp_graph: RampGraph):
         nodes_data = ramp_graph.node_lst

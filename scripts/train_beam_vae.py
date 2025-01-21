@@ -14,14 +14,14 @@ from vae_planner.models.encoder_base import EncoderBase
 from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.beam_train_params import TrainParams
-from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
-                                              BeamVae, BeamEncoder, LatentVarsBase,
-                                              BeamVaeInputs, BeamVaeOutputs,
-                                              BeamDecoder, BeamGraphClassifier)
+from beam_data_gen.models.beam_robot_vae import (BeamVaeParams,
+                                                BeamRobotVae, BeamRobotEncoder, BeamRobotLatents,
+                                                BeamRobotInputs, BeamRobotOutputs,
+                                                BeamDecoder, BeamGraphClassifier)
 
 
 # Define training and testing functions
-def train(model: BeamVae, dataloader, optimizer):
+def train(model: BeamRobotVae, dataloader, optimizer):
 
     model.train()
     total_loss = 0.0
@@ -53,7 +53,7 @@ def train(model: BeamVae, dataloader, optimizer):
             graph_loss / len(dataloader.dataset))
 
 # Define training and testing functions
-def test(model: BeamVae, dataloader):
+def test(model: BeamRobotVae, dataloader):
 
     model.eval()
     total_loss = 0.0
@@ -99,7 +99,7 @@ def main():
     ##########################################
     # Process data
     process_data = ProcessData(np.array(vae_params.pos_lims))
-    poses, flat_adj = process_data(train_params.data_path, ["l_beam_1", "l_beam_2", "l_pin_A"])
+    poses, flat_adj = process_data(train_params.data_path, ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
 
     # Create dataset and dataloaders
     dataset_class = BeamDataset(poses, flat_adj, device=vae_params.device)
@@ -110,11 +110,11 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size=train_params.batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=train_params.batch_size, shuffle=True)
 
-    model = BeamVae(vae_params, 
-                    train_params,
-                    EncoderBase,
-                    BeamDecoder,
-                    BeamGraphClassifier).to(vae_params.device)
+    model = BeamRobotVae(vae_params, 
+                        train_params,
+                        BeamRobotEncoder,
+                        BeamDecoder,
+                        BeamGraphClassifier).to(vae_params.device)
     
     if train_params.read_from_file:
         model.load_state_dict(torch.load(vae_params.in_path))

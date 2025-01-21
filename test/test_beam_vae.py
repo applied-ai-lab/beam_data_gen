@@ -1,9 +1,10 @@
 import torch
 
+from beam_data_gen.models.beam_robot_encoder import (BeamRobotEncoder, BeamRobotInputs)
+from beam_data_gen.models.beam_robot_containers import (BeamRobotInputs, BeamRobotLatents, BeamRobotOutputs)
 from beam_data_gen.models.beam_vae_pp import (BeamVaeParams, TrainParams,
-                                              BeamVae, BeamEncoder, LatentVarsBase,
-                                              BeamVaeInputs, BeamVaeOutputs,
-                                              BeamDecoder, BeamGraphClassifier)
+                                              BeamVae, BeamDecoder, 
+                                              BeamGraphClassifier)
 
 def test_vae():
     
@@ -13,15 +14,15 @@ def test_vae():
     # Create model
     model = BeamVae(beam_params, 
                     train_params,
-                    BeamEncoder,
+                    BeamRobotInputs,
                     BeamDecoder,
                     BeamGraphClassifier)
     
     # Model inputs
     batch_size = 2
-    inputs = BeamVaeInputs()
-    inputs.x_in = torch.zeros([batch_size, beam_params.state_dim * 3], device=beam_params.device)
-    inputs.x_out = torch.ones([batch_size, beam_params.state_dim * 3], device=beam_params.device)
+    inputs = BeamRobotInputs()
+    inputs.x_in = torch.zeros([batch_size, beam_params.input_dim], device=beam_params.device)
+    inputs.x_out = torch.ones([batch_size, beam_params.output_dim], device=beam_params.device)
     inputs.graph_edge_targets = torch.ones([batch_size, beam_params.no_classifier_nodes, beam_params.no_classifier_nodes], device=beam_params.device)
     
     # Model forward pass

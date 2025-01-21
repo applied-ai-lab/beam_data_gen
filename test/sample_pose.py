@@ -24,7 +24,7 @@ def check_collisions(data):
         return True  # Collision detected
     return False  # No collision
 
-m = mujoco.MjModel.from_xml_path('resources/configs/three_beams.xml')
+m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
 d = mujoco.MjData(m)
 
 with mujoco.viewer.launch_passive(m, d) as viewer:

@@ -2,10 +2,12 @@
 
 no_beams                 : 3
 beam_latent_dim          : 10
+no_hands                 : 0
+robot_latent_dim         : 10  
 no_classifier_nodes      : 3      
 action_dim               : 0
 state_dim                : 5
-no_inputs                : 3
+no_inputs                : 1
 no_outputs               : 1
 in_path                  : "model_params/base_encoder/vae_11/vae_epoch_9000.pt"
 out_dir                  : "model_params/base_encoder/vae_11" 

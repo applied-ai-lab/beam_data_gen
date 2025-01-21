@@ -7,8 +7,13 @@ class BeamVaeParams(VaeParams):
     def __init__(self, args=None):
         super().__init__(args)
         
+        # Beam quantities
         self.no_beams = 3 # Number of beams 
         self.beam_latent_dim = 10 # Latent dim size of each latent dimension
+        
+        # Robot quantities
+        self.no_hands = 2
+        self.robot_latent_dim = 10
         
         self.action_dim = 0 # Action size
 
@@ -46,6 +51,9 @@ class BeamVaeParams(VaeParams):
         self.beam_latent_dim = args.beam_latent_dim
         self.no_beams = args.no_beams
         
+        self.no_hands = args.no_hands
+        self.robot_latent_dim = args.robot_latent_dim
+        
         self.pos_lims = args.pos_lims
         
         self.action_dim = args.action_dim
@@ -65,7 +73,7 @@ class BeamVaeParams(VaeParams):
         
     @property
     def latent_dim(self) -> int:
-        self._latent_dim = self.no_beams * self.beam_latent_dim
+        self._latent_dim = (self.no_beams * self.beam_latent_dim) + (self.no_hands * self.robot_latent_dim)
         return self._latent_dim
 
     @property
@@ -74,11 +82,13 @@ class BeamVaeParams(VaeParams):
     
     @property
     def input_dim(self) -> int:
-        return self.state_dim * self.no_inputs
+        return (self.state_dim * self.no_inputs * self.no_beams) + \
+                (self.state_dim * self.no_inputs * self.no_hands)
     
     @property
     def output_dim(self) -> int:
-        return self.state_dim * 3
+        return (self.state_dim * self.no_outputs * self.no_beams) + \
+                (self.state_dim * self.no_outputs * self.no_hands)
     
     @property
     def decoder_input_dim(self) -> int:

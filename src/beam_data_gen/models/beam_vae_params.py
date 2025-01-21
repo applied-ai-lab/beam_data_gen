@@ -73,7 +73,7 @@ class BeamVaeParams(VaeParams):
         
     @property
     def latent_dim(self) -> int:
-        self._latent_dim = (self.no_beams * self.beam_latent_dim) + (self.no_hands * self.robot_latent_dim)
+        self._latent_dim = self.beam_latent_dim + self.robot_latent_dim
         return self._latent_dim
 
     @property
@@ -89,6 +89,14 @@ class BeamVaeParams(VaeParams):
     def output_dim(self) -> int:
         return (self.state_dim * self.no_outputs * self.no_beams) + \
                 (self.state_dim * self.no_outputs * self.no_hands)
+                
+    @property
+    def beam_input_dim(self) -> int:
+        return self.state_dim * self.no_beams * self.no_inputs
+    
+    @property
+    def robot_input_dim(self) -> int:
+        return self.state_dim * self.no_hands * self.no_inputs
     
     @property
     def decoder_input_dim(self) -> int:

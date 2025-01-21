@@ -6,8 +6,8 @@ from vae_planner.models.container_base import VaeInputsBase, LatentVarsBase, Vae
 class BeamRobotInputs(VaeInputsBase):
     def __init__(self):
         super().__init__()
-        self.robot = VaeInputsBase()
-        self.beams = VaeInputsBase()    
+        # self.robot = VaeInputsBase()
+        # self.beams = VaeInputsBase()    
         
 
 class BeamRobotLatents(LatentVarsBase):
@@ -18,17 +18,17 @@ class BeamRobotLatents(LatentVarsBase):
         
     @property
     def mu(self):
-        self._mu = torch.cat([self.beams.mu, self.robot.mu], 1)
+        self._mu = torch.cat([self.robot.mu, self.beams.mu], 1)
         return self._mu
     
     @property
     def log_var(self):
-        self._log_var = torch.cat([self.beams.log_var, self.robot.log_var], 1)
+        self._log_var = torch.cat([self.robot.log_var, self.beams.log_var], 1)
         return self._log_var
     
     @property
     def z(self):
-        self._z = torch.cat([self.beams.z, self.robot.z], 1)
+        self._z = torch.cat([self.robot.z, self.beams.z], 1)
         return self._z
         
 

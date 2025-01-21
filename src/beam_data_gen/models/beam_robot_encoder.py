@@ -36,19 +36,20 @@ class BeamRobotEncoder(EncoderBase):
         self._latents = BeamRobotLatents()
     
     def forward(self, inputs: BeamRobotInputs) -> tuple:
-        x_beam_in = inputs.beams.x_in
-        x_robot_in = inputs.robot.x_in
+        x_robot_in = inputs.x_in[:, 0:self.vae_params.robot_input_dim]
+        x_beam_in = inputs.x_in[:, self.vae_params.robot_input_dim: self.vae_params.robot_input_dim + self.vae_params.beam_input_dim]
         
         self._latents.beams.mu, self._latents.beams.log_var, self._latents.beams.z = self._enc_forward(x_beam_in, self.beams)
         self._latents.robot.mu, self._latents.robot.log_var, self._latents.robot.z = self._enc_forward(x_robot_in, self.hands)        
+        # Latents concatenates the variables above
         return self._latents
     
     def _enc_forward(self, x_in: torch.tensor, mlp: nn.Sequential):
         mlp_out = mlp(x_in)
         # Take the top half as the mean
-        mu = mlp_out[:, 0:self.vae_params.beam_latent_dim]
+        mu = mlp_out[:, 0:int(mlp_out.shape[1] / 2)]
         # Take the bottom half as the variance
-        var = F.softplus(mlp_out[:, self.vae_params.beam_latent_dim:]) + 1e-5
+        var = F.softplus(mlp_out[:, int(mlp_out.shape[1] / 2):]) + 1e-5
         std = torch.sqrt(var)
         # Sample eps from standard Gaussian of size of std
         eps = torch.randn_like(std)

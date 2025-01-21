@@ -14,9 +14,11 @@ class BeamGraphClassifier(Classifier):
         self._loss = nn.CrossEntropyLoss()
         
         # Classifier weights
-        self._loss_weights = torch.tensor([[0., 1., 1.], 
-                                           [1., 0., 1.], 
-                                           [1., 1., 0.]]).to(self.vae_params.device)
+        self._loss_weights = (torch.ones([self.vae_params.no_classifier_nodes, 
+                                          self.vae_params.no_classifier_nodes], dtype=torch.float32)
+                              - 
+                              torch.eye(self.vae_params.no_classifier_nodes)
+                              ).to(self.vae_params.device)
         
         self._loss_crit = nn.BCEWithLogitsLoss(weight=self._loss_weights, reduction="sum")
         

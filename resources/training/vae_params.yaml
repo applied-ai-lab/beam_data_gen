@@ -1,16 +1,16 @@
 # VAE params for training dual arm data
 
 no_beams                 : 3
-beam_latent_dim          : 10
+beam_latent_dim          : 30
 no_hands                 : 2
-robot_latent_dim         : 10  
+robot_latent_dim         : 20  
 no_classifier_nodes      : 5      
 action_dim               : 0
 state_dim                : 5
 no_inputs                : 1
 no_outputs               : 1
-in_path                  : "model_params/beam_robot/vae_0/vae_epoch_9000.pt"
-out_dir                  : "model_params/beam_robot/vae_0" 
+in_path                  : "model_params/beam_robot/vae_2/vae_epoch_7000.pt"
+out_dir                  : "model_params/beam_robot/vae_2" 
 data_freq                : 50.0
 enc_freq                 : 50.0 
 dec_freq                 : 50.0
@@ -25,3 +25,11 @@ pos_lims:
     - 0.10
     - 0.10
     - 0.25  
+
+# Graph nodes to include in the data
+graph_nodes:
+    - "robot_left_hand"
+    - "robot_right_hand"
+    - "l_beam_1"
+    - "l_beam_2"
+    - "l_pin_A"

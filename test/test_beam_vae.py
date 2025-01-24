@@ -5,6 +5,8 @@ from beam_data_gen.models.beam_robot_containers import (BeamRobotInputs, BeamRob
 from beam_data_gen.models.beam_vae_pp import (BeamVaeParams, TrainParams,
                                               BeamVae, BeamDecoder, 
                                               BeamGraphClassifier)
+from beam_data_gen.models.beam_robot_vae import BeamRobotVae
+
 
 def test_vae():
     
@@ -12,12 +14,14 @@ def test_vae():
     train_params = TrainParams()   
        
     # Create model
-    model = BeamVae(beam_params, 
+    model = BeamRobotVae(beam_params, 
                     train_params,
-                    BeamRobotInputs,
+                    BeamRobotEncoder,
                     BeamDecoder,
                     BeamGraphClassifier)
     
+    import pdb; pdb.set_trace()
+        
     # Model inputs
     batch_size = 2
     inputs = BeamRobotInputs()

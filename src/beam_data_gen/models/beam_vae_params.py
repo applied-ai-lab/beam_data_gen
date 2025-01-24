@@ -23,6 +23,9 @@ class BeamVaeParams(VaeParams):
         self.no_outputs = 1
         
         self.pos_lims = [0.60, 0.60, 0.08]
+        self.robot_lims = [1.0, 1.0, 0.25]
+        
+        self.graph_nodes = ["l_beam_1", "l_beam_2", "l_pin_A"]
         
         self.no_classifier_nodes = 3 # self.no_classifier_pred = self.no_classifier_nodes**2
 
@@ -55,6 +58,8 @@ class BeamVaeParams(VaeParams):
         self.robot_latent_dim = args.robot_latent_dim
         
         self.pos_lims = args.pos_lims
+        self.robot_lims = args.robot_lims
+        self.graph_nodes = args.graph_nodes
         
         self.action_dim = args.action_dim
         self.no_classifier_nodes = args.no_classifier_nodes

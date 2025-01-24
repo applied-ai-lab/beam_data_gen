@@ -16,8 +16,8 @@ def main():
     sim = BeamRobotSim()
     
     # Process data
-    process_data = ProcessData(np.array([0.6, 0.6, 0.08]))
-    poses, flat_adj = process_data("data/robot_graphs/", ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
+    process_data = ProcessData(np.array([0.6, 0.6, 0.08]), ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
+    poses, flat_adj = process_data("data/robot_graphs_small/")
 
     poses = torch.tensor(poses, dtype=torch.float32, device=torch.device("cuda"))
     # Create dataset and dataloaders
@@ -40,7 +40,7 @@ def main():
             # Set position
             d.qpos[0:3] = beams_out[k, 0:3].cpu().numpy()
             d.qpos[7:10] = beams_out[k, 5:8].cpu().numpy()
-            d.qpos[14:17] = beams_out[k, 9:12].cpu().numpy()
+            d.qpos[14:17] = beams_out[k, 10:13].cpu().numpy()
             
             d.qpos[21:24] = robot_out[k, 0:3].cpu().numpy()
             d.qpos[28:31] = robot_out[k, 5:8].cpu().numpy()

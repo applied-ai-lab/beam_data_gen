@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation as R
 class ProcessData:
     def __init__(self, pos_lims: np.array):
         self._pos_lims = pos_lims
-    
+        
     def load_data(self, dir_path: str) -> List[pd.DataFrame]:
         pd_files = []        
         for root, _, files in os.walk(dir_path):
@@ -33,8 +33,8 @@ class ProcessData:
         
         pos_lim = torch.tensor(self._pos_lims, dtype=x_pred.dtype, device=x_pred.device)
         
-        x_denorm = x_pred
-        for k in range(3):
+        x_denorm = x_pred.detach().clone()
+        for k in range(int(x_pred.shape[1] / state_dim)):
             
             x_denorm[:, state_dim*k : state_dim*k + 3] *= pos_lim
             # x_denorm[:, state_dim*k + 3] = torch.atan2(x_pred[:, state_dim*k + 3].min(torch.ones([1], dtype=x_pred.dtype, device=x_pred.device)).max(-torch.ones([1], dtype=x_pred.dtype, device=x_pred.device)), x_pred[:, state_dim*k + 4].min(1.0).max(-1.0))
@@ -51,12 +51,13 @@ class ProcessData:
 
         for pd in pd_file_lst:
             data_lst = []
-            for beam in beam_names:
+            for k, beam in enumerate(beam_names):
                 pose_data = self.extract_pose(np.vstack(pd[beam].to_list()))
                 
                 # Standardise position
                 pose_standardised = copy.deepcopy(pose_data)
                 pose_standardised[:, 0:3] = np.divide(pose_data[:, 0:3], self._pos_lims) 
+                
                 data_lst.append(pose_standardised)
             
             pose_mat = np.hstack(data_lst)

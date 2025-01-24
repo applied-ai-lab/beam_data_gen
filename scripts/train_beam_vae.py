@@ -15,6 +15,7 @@ from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.beam_train_params import TrainParams
 from beam_data_gen.models.beam_vae_pp import BeamVae
+from beam_data_gen.models.linear_classifier import LinearClassifier
 from beam_data_gen.models.beam_robot_vae import (BeamVaeParams,
                                                 BeamRobotVae, BeamRobotEncoder, BeamRobotLatents,
                                                 BeamRobotInputs, BeamRobotOutputs,

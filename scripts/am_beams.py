@@ -15,6 +15,7 @@ from vae_planner.argparse_yaml_loader.yaml_loader import YamlLoader
 from vae_planner.models.encoder_base import EncoderBase
 
 from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected, RampGraph)
+from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
 from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.beam_train_params import TrainParams
@@ -52,7 +53,7 @@ def main():
     
     # Load test data
     process_data = ProcessData(vae_params.pos_lims)
-    poses, flat_adj = process_data(train_params.data_path, ["l_beam_1", "l_beam_2", "l_pin_A"])
+    poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
     
     no_inputs = 1000
     rand_indices = np.random.choice(poses.shape[0], size=no_inputs)
@@ -82,7 +83,8 @@ def main():
 
     # Classify the graphs      
     graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
-    latent_inspector.plot_latents(x, y, graphs_for_plotting)
+    latent_inspector.plot_latents(x, y, graphs_for_plotting[:, 2:, 2:])
+    plt.show()
         
     # AM for ls
     latents = LatentVarsBase()
@@ -102,7 +104,7 @@ def main():
     denorm_out = data_processor.denorm_output(out_pred.x_pred)
     
     # Graph Target
-    adj_mat = l_pin_removed.A
+    adj_mat = l_connected_robot.A
     graph_target = torch.tensor([adj_mat], dtype=torch.float32)
     graph_target = graph_target.to(vae_params.device)
     
@@ -115,7 +117,7 @@ def main():
     #                         torch.atan2(latents.z[:, latent_dims[1]], latents.z[:, latent_dims[0]]).item()],
     #                        dtype=torch.float32).requires_grad_()
     
-    termination_criteria = 0.2
+    termination_criteria = 0.45
     
     loss_func = nn.BCEWithLogitsLoss()
     
@@ -141,7 +143,7 @@ def main():
                 grad_features = grad(outputs=loss, inputs=latents.z, retain_graph=True)[0]
                 grad_list.append(grad_features.detach().cpu().numpy().squeeze())
                     
-                latents.z = latents.z - 1.0e-2 * grad_features
+                latents.z = latents.z - 1.0e-3 * grad_features
                 latent_list.append(latents.z.detach().cpu().numpy().squeeze())
                 
                 out_pred = model.decoder(latents, None)

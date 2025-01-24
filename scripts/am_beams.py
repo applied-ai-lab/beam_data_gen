@@ -149,7 +149,7 @@ def main():
                 out_pred = model.decoder(latents, None)
                 out_graph = model.classifier(latents.z)
                 
-                denorm_out = data_processor.denorm_output(out_pred.x_pred)
+                denorm_out = data_processor.denorm_output(out_pred.x_pred)[:, 10:]
                 
                 # Set position
                 d.qpos[0:3] = denorm_out[0, 0:3].cpu().detach().numpy()

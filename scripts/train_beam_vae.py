@@ -14,6 +14,7 @@ from vae_planner.models.encoder_base import EncoderBase
 from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.beam_train_params import TrainParams
+from beam_data_gen.models.beam_vae_pp import BeamVae
 from beam_data_gen.models.beam_robot_vae import (BeamVaeParams,
                                                 BeamRobotVae, BeamRobotEncoder, BeamRobotLatents,
                                                 BeamRobotInputs, BeamRobotOutputs,
@@ -110,9 +111,9 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size=train_params.batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=train_params.batch_size, shuffle=True)
 
-    model = BeamRobotVae(vae_params, 
+    model = BeamVae(vae_params, 
                         train_params,
-                        BeamRobotEncoder,
+                        EncoderBase,
                         BeamDecoder,
                         BeamGraphClassifier).to(vae_params.device)
     

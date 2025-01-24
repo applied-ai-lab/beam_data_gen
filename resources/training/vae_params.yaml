@@ -9,8 +9,8 @@ action_dim               : 0
 state_dim                : 5
 no_inputs                : 1
 no_outputs               : 1
-in_path                  : "model_params/beam_robot/vae_2/vae_epoch_7000.pt"
-out_dir                  : "model_params/beam_robot/vae_2" 
+in_path                  : "model_params/beam_robot/vae_5/vae_epoch_1000.pt"
+out_dir                  : "model_params/beam_robot/vae_5" 
 data_freq                : 50.0
 enc_freq                 : 50.0 
 dec_freq                 : 50.0
@@ -22,9 +22,15 @@ cuda                     : True
 
 # Beam Params
 pos_lims:
-    - 0.10
-    - 0.10
-    - 0.25  
+    - 0.60
+    - 0.60
+    - 0.08
+
+# Beam Params
+robot_lims:
+    - 1.00
+    - 1.00
+    - 0.25 
 
 # Graph nodes to include in the data
 graph_nodes:

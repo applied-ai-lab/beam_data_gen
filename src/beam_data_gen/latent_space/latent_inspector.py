@@ -5,6 +5,8 @@ from matplotlib import pyplot as plt
 from vae_planner.latent_space.latent_inspector import LatentInspector
 
 from beam_data_gen.models.beam_vae_pp import BeamVae, BeamVaeParams, BeamVaeInputs
+from beam_data_gen.beam_impl.robot_graph import RampGraph, RobotGraph
+from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected)
 
 
 class BeamLSInspector(LatentInspector):
@@ -12,20 +14,28 @@ class BeamLSInspector(LatentInspector):
     def __init__(self, model: BeamVae, vae_params: BeamVaeParams) -> None:
         super().__init__(model, vae_params)
         
-        self.colour_code = {
-            str([0, 0]): {'colour': '#EE6677', 
-                           'label': 'Unconnected',
+        self.beam_only_colours = {
+            self.graph_to_key(l_disconnected): {'colour': '#EE6677', 
+                           'label': 'Disconnected',
                          'plotted': False}, 
-            str([0, 1]): {'colour': '#3E9ABB', 
+            'default': {'colour': '#3E9ABB', 
                            'label': 'Undefined',
                          'plotted': False},
-            str([1, 0]): {'colour': '#0077BB', 
-                           'label': 'Beams assembled',
+            self.graph_to_key(l_pin_removed): {'colour': '#0077BB', 
+                           'label': 'Pin removed',
                          'plotted': False},
-            str([1, 1]): {'colour': '#EE7733', 
+            self.graph_to_key(l_connected_graph): {'colour': '#EE7733', 
                            'label': 'Complete',
                          'plotted': False},        
         }
+
+    def graph_to_key(self, ramp_graph: RampGraph):
+        return self.adj_mat_to_key(ramp_graph.A)
+    
+    def adj_mat_to_key(self, A: np.array):
+        a_list = A.astype(int).flatten().tolist()
+        return ' '.join(map(str, a_list))
+    
         
     def find_latent_dims(self, inputs: BeamVaeInputs):
         with torch.no_grad():
@@ -44,9 +54,13 @@ class BeamLSInspector(LatentInspector):
         y_np = y.detach().cpu().numpy()
         graphs_np = batched_graphs.detach().cpu().detach().numpy()
         
-        # Create colours        
-        colour_list = list(self.colour_code[str([graphs_np[k, 0, 1].astype(int), 
-                                                 graphs_np[k, 0, 2].astype(int)])] for k in range(graphs_np.shape[0]))
+        # Create colours      
+        if batched_graphs.shape[1] == 3:  
+            colour_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, :, :])] for k in range(graphs_np.shape[0]))
+        elif batched_graphs.shape[1] == 5:  
+            colour_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, :, :])] for k in range(graphs_np.shape[0]))
+            return
+        
         
         fig, axis = plt.subplots(1, 1)
         axis.axis('equal')

@@ -95,15 +95,15 @@ def main():
             
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1e-2, 100, 0.2)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 0.5e-2, 100, 0.2)
     act_max = ActivationMaximisation(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
     
-    m = mujoco.MjModel.from_xml_path('resources/configs/three_beams.xml')
+    m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
     d = mujoco.MjData(m)
     
-    latents.z = -1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
+    latents.z = -1.5 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
     latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)
@@ -115,10 +115,12 @@ def main():
     denorm_out = data_processor.denorm_output(out_pred.x_pred)
     
     # Graph Target
-    graph = l_pin_removed_robot
+    graph = l_connected_robot
     graph.add_hand("robot_left_hand", "l_beam_1")
     graph.add_hand("robot_right_hand", "l_beam_2")
+    
     adj_mat = graph.A
+    
     graph_target = torch.tensor([adj_mat], dtype=torch.float32)
     graph_target = graph_target.to(vae_params.device)
     
@@ -154,24 +156,38 @@ def main():
                 out_pred = model.decoder(latents, None)
                 out_graph = model.classifier(latents.z)
                 
-                denorm_out = data_processor.denorm_output(out_pred.x_pred)[:, 10:]
+                denorm_output = data_processor.denorm_output(out_pred.x_pred)[:, :]
+                denorm_out = denorm_output[:, 2*5:]
+                robot_out = denorm_output[:, 0:2*5]
                 
                 # Set position
                 d.qpos[0:3] = denorm_out[0, 0:3].cpu().detach().numpy()
                 d.qpos[7:10] = denorm_out[0, 5:8].cpu().detach().numpy()
                 d.qpos[14:17] = denorm_out[0, 10:13].cpu().detach().numpy()
                 
+                d.qpos[21:24] = robot_out[0, 0:3].cpu().detach().numpy()
+                d.qpos[28:31] = robot_out[0, 5:8].cpu().detach().numpy()
+                
                 # Set orientation
                 l1_z = R.from_euler("xyz", [0, 0, denorm_out[0, 3].cpu().detach().numpy()])
                 l2_z = R.from_euler("xyz", [0, 0, denorm_out[0, 8].cpu().detach().numpy()])
                 pa_z = R.from_euler("xyz", [0, 0, denorm_out[0, 13].cpu().detach().numpy()])
+                
+                robot_left = R.from_euler("xyz", [0, 0, robot_out[0, 3].cpu().detach().numpy()])
+                robot_right = R.from_euler("xyz", [0, 0, robot_out[0, 8].cpu().detach().numpy()])
                 
                 d.qpos[4:7]   = l1_z.as_quat()[0:3]
                 d.qpos[3]   = l1_z.as_quat()[3]
                 d.qpos[11:14] = l2_z.as_quat()[0:3]
                 d.qpos[10] = l2_z.as_quat()[3]
                 d.qpos[18:21] = pa_z.as_quat()[0:3]
-                d.qpos[17] = pa_z.as_quat()[3]            
+                d.qpos[17] = pa_z.as_quat()[3]    
+                
+                d.qpos[25:28] = robot_left.as_quat()[0:3]
+                d.qpos[24] = robot_left.as_quat()[3]
+                        
+                d.qpos[32:35] = robot_right.as_quat()[0:3]
+                d.qpos[31] = robot_right.as_quat()[3]        
                 
                 # mj_step can be replaced with code that also evaluates
                 # a policy and applies a control signal before stepping the physics.

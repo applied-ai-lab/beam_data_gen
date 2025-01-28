@@ -82,7 +82,7 @@ def main():
                 for right_connection in right_connections:
                     
                     counter = 0
-                    max_iters = 4
+                    max_iters = 1000
             
                     # Add hand connections
                     graph.add_hand("robot_right_hand", right_connection)
@@ -114,13 +114,10 @@ def main():
                         time_until_next_step = m.opt.timestep - (time.time() - step_start)
                         if time_until_next_step > 0:
                             time.sleep(time_until_next_step)
-                            
-                        import pdb
-                        pdb.set_trace()
                         
                     
             # Save data
-            datasaver.df.to_pickle(os.path.join("data/robot_graphs_small", name + ".pkl"))           
+            datasaver.df.to_pickle(os.path.join("data/robot_graphs_2", name + ".pkl"))           
 
     return 0
 

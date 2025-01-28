@@ -95,7 +95,7 @@ def main():
             
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 0.5e-2, 100, 0.2)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.2)
     act_max = ActivationMaximisation(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
@@ -103,7 +103,7 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
     d = mujoco.MjData(m)
     
-    latents.z = -1.5 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
+    latents.z = -1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
     latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)
@@ -115,7 +115,7 @@ def main():
     denorm_out = data_processor.denorm_output(out_pred.x_pred)
     
     # Graph Target
-    graph = l_connected_robot
+    graph = l_pin_removed_robot
     graph.add_hand("robot_left_hand", "l_beam_1")
     graph.add_hand("robot_right_hand", "l_beam_2")
     

@@ -30,7 +30,7 @@ class BeamLSInspector(LatentInspector):
         }
         
         self.hand_connections = {
-            ' '.join(map(str, [0, 0, 0, 0, 0])) : {'colour': '#EE6677', 
+            ' '.join(map(str, [0, 0, 0, 0, 0])) : {'colour': 'r', 
                             'label': 'Free space',
                             'plotted': False},
             ' '.join(map(str, [1, 0, 0, 0, 0])) : {'colour': '#0077BB', 
@@ -49,7 +49,11 @@ class BeamLSInspector(LatentInspector):
                             'label': 'Pin',
                             'plotted': False}
         }
-    
+        
+    def reset_colour_dict(self, colour_list):
+        for c_dict in colour_list:
+            c_dict['plotted'] = False
+        return    
 
     def graph_to_key(self, ramp_graph: RampGraph):
         return self.adj_mat_to_key(ramp_graph.A)
@@ -70,7 +74,7 @@ class BeamLSInspector(LatentInspector):
             latent_dims = np.argsort(mean_var)
             return latent_dims, mean_var[latent_dims]
         
-    def plot_latents(self, x: torch.tensor, y: torch.tensor, batched_graphs: torch.tensor):
+    def plot_latents(self, x: torch.tensor, y: torch.tensor, batched_graphs: torch.tensor, title: str=None):
         # Convert values to numpy arrays
         x_np = x.detach().cpu().numpy()
         y_np = y.detach().cpu().numpy()
@@ -78,13 +82,19 @@ class BeamLSInspector(LatentInspector):
         
         
         # Create colours   
-        beam_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, -3:, -3:])] for k in range(graphs_np.shape[0]))
+        # beam_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, -3:, -3:])] for k in range(graphs_np.shape[0]))
         
         undefined_dict = {'colour': 'k', 
                             'label': 'Undefined',
                             'plotted': False}
         
-        
+        beam_list = []
+        for k in range(graphs_np.shape[0]):
+            try:
+                beam_list.append(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, -3:, -3:])])
+            except KeyError:
+                beam_list.append(undefined_dict)
+            
         left_list = []
         for k in range(graphs_np.shape[0]):
             try:
@@ -103,6 +113,7 @@ class BeamLSInspector(LatentInspector):
         colour_list = [beam_list, left_list, right_list]
         
         fig, axes = plt.subplots(1, 3)
+        fig.suptitle(title)
         for axis_counter, axis in enumerate(axes):
             axis.axis('equal')
             for k in range(x_np.shape[0]):
@@ -112,4 +123,8 @@ class BeamLSInspector(LatentInspector):
                 else:
                     axis.scatter(x_np[k], y_np[k], color=colour_list[axis_counter][k]["colour"])
             axis.legend()
-        return axis
+        
+        for c_list in colour_list:
+            self.reset_colour_dict(c_list)
+        
+        return fig, axes

@@ -28,6 +28,28 @@ class BeamLSInspector(LatentInspector):
                            'label': 'Complete',
                          'plotted': False},        
         }
+        
+        self.hand_connections = {
+            ' '.join(map(str, [0, 0, 0, 0, 0])) : {'colour': '#EE6677', 
+                            'label': 'Free space',
+                            'plotted': False},
+            ' '.join(map(str, [1, 0, 0, 0, 0])) : {'colour': '#0077BB', 
+                            'label': 'Left hand',
+                            'plotted': False},
+            ' '.join(map(str, [0, 1, 0, 0, 0])) : {'colour': '#EE7733', 
+                            'label': 'Right hand',
+                            'plotted': False},
+            ' '.join(map(str, [0, 0, 1, 0, 0])) : {'colour': 'c', 
+                            'label': 'Beam 1',
+                            'plotted': False},
+            ' '.join(map(str, [0, 0, 0, 1, 0])) : {'colour': 'm', 
+                            'label': 'Beam 2',
+                            'plotted': False},
+            ' '.join(map(str, [0, 0, 0, 0, 1])) : {'colour': 'g', 
+                            'label': 'Pin',
+                            'plotted': False}
+        }
+    
 
     def graph_to_key(self, ramp_graph: RampGraph):
         return self.adj_mat_to_key(ramp_graph.A)
@@ -54,21 +76,40 @@ class BeamLSInspector(LatentInspector):
         y_np = y.detach().cpu().numpy()
         graphs_np = batched_graphs.detach().cpu().detach().numpy()
         
-        # Create colours      
-        if batched_graphs.shape[1] == 3:  
-            colour_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, :, :])] for k in range(graphs_np.shape[0]))
-        elif batched_graphs.shape[1] == 5:  
-            colour_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, :, :])] for k in range(graphs_np.shape[0]))
-            return
+        
+        # Create colours   
+        beam_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, -3:, -3:])] for k in range(graphs_np.shape[0]))
+        
+        undefined_dict = {'colour': 'k', 
+                            'label': 'Undefined',
+                            'plotted': False}
         
         
-        fig, axis = plt.subplots(1, 1)
-        axis.axis('equal')
-        for k in range(x_np.shape[0]):
-            if not colour_list[k]["plotted"]:
-                axis.scatter(x_np[k], y_np[k], color=colour_list[k]["colour"], label=colour_list[k]["label"])
-                colour_list[k]["plotted"] = True
-            else:
-                axis.scatter(x_np[k], y_np[k], color=colour_list[k]["colour"])
-        axis.legend()
+        left_list = []
+        for k in range(graphs_np.shape[0]):
+            try:
+                left_list.append(self.hand_connections[self.adj_mat_to_key(graphs_np[k, 0, :])])
+            except KeyError:
+                left_list.append(undefined_dict)
+                
+        right_list = []
+        for k in range(graphs_np.shape[0]):
+            try:
+                right_list.append(self.hand_connections[self.adj_mat_to_key(graphs_np[k, 1, :])])
+            except:
+                right_list.append(undefined_dict)
+        
+
+        colour_list = [beam_list, left_list, right_list]
+        
+        fig, axes = plt.subplots(1, 3)
+        for axis_counter, axis in enumerate(axes):
+            axis.axis('equal')
+            for k in range(x_np.shape[0]):
+                if not colour_list[axis_counter][k]["plotted"]:
+                    axis.scatter(x_np[k], y_np[k], color=colour_list[axis_counter][k]["colour"], label=colour_list[axis_counter][k]["label"])
+                    colour_list[axis_counter][k]["plotted"] = True
+                else:
+                    axis.scatter(x_np[k], y_np[k], color=colour_list[axis_counter][k]["colour"])
+            axis.legend()
         return axis

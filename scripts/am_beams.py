@@ -70,7 +70,7 @@ def main():
     (latent_dims, mean_var) = latent_inspector.find_latent_dims(model_inputs)
     
     # Sample from 2d circle
-    no_samps = 1000
+    no_samps = 300
     x, y = latent_inspector.sample_latent_values_from_unit_circle_2d(radius=2.5, no_samps=no_samps)
     
     latents_for_plotting = LatentVarsBase()
@@ -78,12 +78,12 @@ def main():
     
     print(latent_dims)
     
-    latents_for_plotting.z[:, latent_dims[0]] = x
-    latents_for_plotting.z[:, latent_dims[1]] = y
+    latents_for_plotting.z[:, latent_dims[2]] = x
+    latents_for_plotting.z[:, latent_dims[3]] = y
 
     # Classify the graphs      
     graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
-    latent_inspector.plot_latents(x, y, graphs_for_plotting[:, 2:, 2:])
+    latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :])
     plt.show()
         
     # AM for ls

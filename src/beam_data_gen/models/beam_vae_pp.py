@@ -25,8 +25,7 @@ class BeamVae(VaeBase):
     
     def forward(self, inputs: BeamVaeInputs):
         super().forward(inputs)        
-        # Apply classifier predictions on the mean values not the samples
-        self._vae_outputs.graph_edge_logits = self._classifier.forward(self._latents.mu)
+        self._vae_outputs.graph_edge_logits = self._classifier.forward(self._latents.z)
         return (self._latents, self._vae_outputs)
     
     def loss_func(self, inputs: BeamVaeInputs, latents: LatentVarsBase, outputs: BeamVaeOutputs):

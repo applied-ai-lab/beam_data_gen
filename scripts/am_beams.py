@@ -81,9 +81,9 @@ def main():
     
     print(latent_dims)
     
-    # i, j = 0, 1
-    # latents_for_plotting.z[:, latent_dims[0]] = x
-    # latents_for_plotting.z[:, latent_dims[1]] = y
+    # i, j = 1, 4
+    # latents_for_plotting.z[:, latent_dims[i]] = x
+    # latents_for_plotting.z[:, latent_dims[j]] = y
 
     # # Classify the graphs      
     # graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
@@ -95,7 +95,7 @@ def main():
             
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.2)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 0.5e-1, 100, 0.2)
     act_max = ActivationMaximisation(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
@@ -203,6 +203,22 @@ def main():
             gradient_traj = np.vstack(grad_list)
             latent_traj = np.vstack(latent_list)
             
+            print(np.std(latent_traj, 0))
+            
+            i, j = latent_dims[0], latent_dims[1]
+            latents_for_plotting.z[:, i] = x
+            latents_for_plotting.z[:, j] = y
+
+            # Classify the graphs      
+            graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
+            title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
+            fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
+            
+            for axis in axes:
+                axis.plot(latent_traj[:, i], latent_traj[:, j], color='k')
+            plt.show()        
+            
+                        
             import pdb; pdb.set_trace()
 
 

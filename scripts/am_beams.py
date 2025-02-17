@@ -95,7 +95,7 @@ def main():
             
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 0.5e-1, 100, 0.2)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.2)
     act_max = ActivationMaximisation(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
@@ -128,6 +128,7 @@ def main():
     print(torch.sigmoid(out_graph).round())
     
     loss = torch.tensor([1000.0]).to(vae_params.device)
+    loss_lst = []
         
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
@@ -143,6 +144,8 @@ def main():
                 latents.z, grad_features, loss = act_max.advance(model._classifier.forward, 
                                                                 latents.z,
                                                                 graph_target)
+                
+                loss_lst.append(loss.detach().cpu().numpy())
                 
                 # Loss                
                 out_graph = model._classifier.forward(latents.z)
@@ -202,6 +205,7 @@ def main():
             # Stack gradients
             gradient_traj = np.vstack(grad_list)
             latent_traj = np.vstack(latent_list)
+            loss_traj = np.vstack(loss_lst)
             
             print(np.std(latent_traj, 0))
             
@@ -216,6 +220,9 @@ def main():
             
             for axis in axes:
                 axis.plot(latent_traj[:, i], latent_traj[:, j], color='k')
+                
+            plt.figure()
+            plt.plot(loss_traj)
             plt.show()        
             
                         

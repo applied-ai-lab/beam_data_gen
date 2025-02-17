@@ -5,6 +5,7 @@ import os
 
 import torch
 from torch import nn
+from torch import optim
 import numpy as np
 from matplotlib import pyplot as plt
 import mujoco
@@ -60,7 +61,7 @@ def main():
     
     no_inputs = 1000
     rand_indices = np.random.choice(poses.shape[0], size=no_inputs)
-      
+    
     
     # Model inputs
     model_inputs = BeamVaeInputs()
@@ -95,7 +96,7 @@ def main():
             
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.2)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-1, 100, 0.2)
     act_max = ActivationMaximisation(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
@@ -103,7 +104,7 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
     d = mujoco.MjData(m)
     
-    latents.z = -1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_()
+    latents.z = -1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_(True)
     latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)
@@ -128,7 +129,18 @@ def main():
     print(torch.sigmoid(out_graph).round())
     
     loss = torch.tensor([1000.0]).to(vae_params.device)
-    loss_lst = []
+    loss_lst = []    
+    
+    loss_graph_lst = []
+    loss_mse_lst = []
+    
+    init_pin_pose = out_pred.x_pred[:, -5:].clone()   
+    mse_loss =nn.MSELoss(reduction='sum')
+        
+    latents.z = latents.z.clone().detach().requires_grad_(True)
+    optimizer = optim.Adam([latents.z], lr=act_max_params.lr)
+    
+    counter = 0
         
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
@@ -139,13 +151,24 @@ def main():
         
         # Start loop and sample pose
         while viewer.is_running():
-            while torch.norm(loss) > act_max_params.stop_criterion:
+            while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
                 
-                latents.z, grad_features, loss = act_max.advance(model._classifier.forward, 
-                                                                latents.z,
-                                                                graph_target)
+                # latents.z, grad_features, loss = act_max.advance(model._classifier.forward, 
+                #                                                 latents.z,
+                #                                                 graph_target)
+                
+                graph_hat = model._classifier.forward(latents.z)
+                x_out = model.decoder(latents, None)
+                loss_graph = act_max_params.loss_func(graph_hat, graph_target)
+                loss_mse = 1e-1 * mse_loss(x_out.x_pred[:, -5:], init_pin_pose)
+                loss = loss_graph + loss_mse
+                optimizer.zero_grad()                
+                loss.backward(retain_graph=True)
+                optimizer.step()
                 
                 loss_lst.append(loss.detach().cpu().numpy())
+                loss_mse_lst.append(loss_mse.detach().cpu().numpy())
+                loss_graph_lst.append(loss_graph.detach().cpu().numpy())
                 
                 # Loss                
                 out_graph = model._classifier.forward(latents.z)
@@ -200,12 +223,16 @@ def main():
                 viewer.sync()   
                 
                 # Rudimentary time keeping, will drift relative to wall clock.
-                time.sleep(0.1)
+                time.sleep(0.5)
+                
+                counter += 1
             
             # Stack gradients
             gradient_traj = np.vstack(grad_list)
             latent_traj = np.vstack(latent_list)
             loss_traj = np.vstack(loss_lst)
+            loss_mse_traj = np.vstack(loss_mse_lst)
+            loss_graph_traj = np.vstack(loss_graph_lst)
             
             print(np.std(latent_traj, 0))
             
@@ -222,7 +249,10 @@ def main():
                 axis.plot(latent_traj[:, i], latent_traj[:, j], color='k')
                 
             plt.figure()
-            plt.plot(loss_traj)
+            plt.plot(loss_traj, label="total")
+            plt.plot(loss_mse_traj, label="mse loss")
+            plt.plot(loss_graph_traj, label="graph loss")
+            plt.legend()
             plt.show()        
             
                         

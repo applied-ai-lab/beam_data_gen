@@ -161,7 +161,7 @@ def main():
                 x_out = model.decoder(latents, None)
                 loss_graph = act_max_params.loss_func(graph_hat, graph_target)
                 loss_mse = 1e-1 * mse_loss(x_out.x_pred[:, -5:], init_pin_pose)
-                loss = loss_graph + loss_mse
+                loss = loss_graph # + loss_mse
                 optimizer.zero_grad()                
                 loss.backward(retain_graph=True)
                 optimizer.step()

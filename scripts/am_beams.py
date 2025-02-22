@@ -28,6 +28,7 @@ from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
                                               BeamVaeInputs, BeamVaeOutputs,
                                               BeamDecoder, BeamGraphClassifier)
 from beam_data_gen.latent_space.latent_inspector import BeamLSInspector
+from beam_data_gen.simulator.beam_robot_sim import BeamRobotSim
 
 
 def main():
@@ -40,6 +41,8 @@ def main():
     train_params = TrainParams(train_args)
     
     data_processor = ProcessData(np.array(vae_params.pos_lims))
+    
+    beam_sim = BeamRobotSim(data_processor)
     
 
     model = BeamVae(vae_params, 
@@ -182,39 +185,9 @@ def main():
                 out_pred = model.decoder(latents, None)
                 out_graph = model.classifier(latents.z)
                 
-                denorm_output = data_processor.denorm_output(out_pred.x_pred)[:, :]
-                denorm_out = denorm_output[:, 2*5:]
-                robot_out = denorm_output[:, 0:2*5]
-                
-                # Set position
-                d.qpos[0:3] = denorm_out[0, 0:3].cpu().detach().numpy()
-                d.qpos[7:10] = denorm_out[0, 5:8].cpu().detach().numpy()
-                d.qpos[14:17] = denorm_out[0, 10:13].cpu().detach().numpy()
-                
-                d.qpos[21:24] = robot_out[0, 0:3].cpu().detach().numpy()
-                d.qpos[28:31] = robot_out[0, 5:8].cpu().detach().numpy()
-                
-                # Set orientation
-                l1_z = R.from_euler("xyz", [0, 0, denorm_out[0, 3].cpu().detach().numpy()])
-                l2_z = R.from_euler("xyz", [0, 0, denorm_out[0, 8].cpu().detach().numpy()])
-                pa_z = R.from_euler("xyz", [0, 0, denorm_out[0, 13].cpu().detach().numpy()])
-                
-                robot_left = R.from_euler("xyz", [0, 0, robot_out[0, 3].cpu().detach().numpy()])
-                robot_right = R.from_euler("xyz", [0, 0, robot_out[0, 8].cpu().detach().numpy()])
-                
-                d.qpos[4:7]   = l1_z.as_quat()[0:3]
-                d.qpos[3]   = l1_z.as_quat()[3]
-                d.qpos[11:14] = l2_z.as_quat()[0:3]
-                d.qpos[10] = l2_z.as_quat()[3]
-                d.qpos[18:21] = pa_z.as_quat()[0:3]
-                d.qpos[17] = pa_z.as_quat()[3]    
-                
-                d.qpos[25:28] = robot_left.as_quat()[0:3]
-                d.qpos[24] = robot_left.as_quat()[3]
-                        
-                d.qpos[32:35] = robot_right.as_quat()[0:3]
-                d.qpos[31] = robot_right.as_quat()[3]        
-                
+                # Decoder the prediction
+                beam_sim.decode_x(d, out_pred.x_pred)
+                                
                 # mj_step can be replaced with code that also evaluates
                 # a policy and applies a control signal before stepping the physics.
                 mujoco.mj_step(m, d)    

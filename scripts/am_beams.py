@@ -18,7 +18,6 @@ from vae_planner.argparse_yaml_loader.yaml_loader import YamlLoader
 from vae_planner.models.encoder_base import EncoderBase
 from vae_planner.activation_maximisation.act_max import (ActivationMaximisation, ActMaxParams, ActMaxOutput)
 
-from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected, RampGraph)
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
 from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.beam_vae_params import BeamVaeParams
@@ -85,18 +84,6 @@ def main():
     
     print(latent_dims)
     
-    # i, j = 1, 4
-    # latents_for_plotting.z[:, latent_dims[i]] = x
-    # latents_for_plotting.z[:, latent_dims[j]] = y
-
-    # # Classify the graphs      
-    # graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
-    # title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
-    # fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
-    
-    # file_path = os.path.join('figures', 'latent_space', f'VAE_11_latent_{i}_{j}')
-    # plt.show()
-            
         
     # AM for ls
     act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-1, 100, 0.2)
@@ -125,8 +112,7 @@ def main():
     
     adj_mat = graph.A
     
-    graph_target = torch.tensor([adj_mat], dtype=torch.float32)
-    graph_target = graph_target.to(vae_params.device)
+    graph_target = torch.tensor([adj_mat], dtype=torch.float32).to(vae_params.device)
     
     print(adj_mat)
     print(torch.sigmoid(out_graph).round())
@@ -140,53 +126,92 @@ def main():
     init_pin_pose = out_pred.x_pred[:, -5:].clone()   
     mse_loss =nn.MSELoss(reduction='sum')
         
+    latent_torch_list = []
     latents.z = latents.z.clone().detach().requires_grad_(True)
-    optimizer = optim.Adam([latents.z], lr=act_max_params.lr)
+    latent_list.append(latents.z.detach().cpu().numpy().squeeze())
+    latent_torch_list.append(latents.z)    
+    
+    # Create optimiser
+    optimizer = optim.SGD([latents.z], lr=act_max_params.lr)
     
     counter = 0
+    
+    while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
+        graph_hat = model._classifier.forward(latents.z)
+        loss = act_max_params.loss_func(graph_hat, graph_target)
+        optimizer.zero_grad()                
+        loss.backward(retain_graph=True)
+        optimizer.step()
+        
+        # Store some values
+        loss_lst.append(loss.detach().cpu().numpy())
+        latent_list.append(latents.z.detach().cpu().numpy().squeeze())
+        latent_torch_list.append(latents.z.clone())
+        
+    # Set new graph target
+    # Graph Target
+    graph = l_pin_removed_robot
+    graph.add_hand("robot_left_hand", "l_beam_1")
+    graph.add_hand("robot_right_hand", "l_pin_A")
+    graph_target = torch.tensor([graph.A], dtype=torch.float32).to(vae_params.device)
+    
+    loss = torch.tensor([1000.0]).to(vae_params.device)    
+    counter = 0
+    
+    while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
+        graph_hat = model._classifier.forward(latents.z)
+        loss = act_max_params.loss_func(graph_hat, graph_target)
+        optimizer.zero_grad()                
+        loss.backward(retain_graph=True)
+        optimizer.step()
+        
+        # Store some values
+        loss_lst.append(loss.detach().cpu().numpy())
+        latent_list.append(latents.z.detach().cpu().numpy().squeeze())
+        latent_torch_list.append(latents.z.clone())
+        
+    
+    # Set new graph target
+    # Graph Target
+    graph = l_connected_robot
+    graph.add_hand("robot_left_hand", "l_beam_1")
+    graph.add_hand("robot_right_hand", "l_pin_A")
+    graph_target = torch.tensor([graph.A], dtype=torch.float32).to(vae_params.device)
+    
+    loss = torch.tensor([1000.0]).to(vae_params.device)    
+    counter = 0
+    
+    while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
+        graph_hat = model._classifier.forward(latents.z)
+        loss = act_max_params.loss_func(graph_hat, graph_target)
+        optimizer.zero_grad()                
+        loss.backward(retain_graph=True)
+        optimizer.step()
+        
+        # Store some values
+        loss_lst.append(loss.detach().cpu().numpy())
+        latent_list.append(latents.z.detach().cpu().numpy().squeeze())
+        latent_torch_list.append(latents.z.clone())
+    
+    latents_torch = torch.cat(latent_torch_list,dim=0)
+    
+    latents = LatentVarsBase()
+    latents.z = latents_torch
+    
+    x_out = model.decoder(latents, None)
+    out_graph = model._classifier.forward(latents.z)
         
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
         
         input("continue")
         
-        step_start = time.time()
-        
         # Start loop and sample pose
         while viewer.is_running():
-            while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
-                
-                # latents.z, grad_features, loss = act_max.advance(model._classifier.forward, 
-                #                                                 latents.z,
-                #                                                 graph_target)
-                
-                graph_hat = model._classifier.forward(latents.z)
-                x_out = model.decoder(latents, None)
-                loss_graph = act_max_params.loss_func(graph_hat, graph_target)
-                loss_mse = 1e-1 * mse_loss(x_out.x_pred[:, -5:], init_pin_pose)
-                loss = loss_graph # + loss_mse
-                optimizer.zero_grad()                
-                loss.backward(retain_graph=True)
-                optimizer.step()
-                
-                loss_lst.append(loss.detach().cpu().numpy())
-                loss_mse_lst.append(loss_mse.detach().cpu().numpy())
-                loss_graph_lst.append(loss_graph.detach().cpu().numpy())
-                
-                # Loss                
-                out_graph = model._classifier.forward(latents.z)
-                
-                print(torch.sigmoid(out_graph).round())
-                
-                # Graph features
-                grad_list.append(grad_features.detach().cpu().numpy().squeeze())
-                latent_list.append(latents.z.detach().cpu().numpy().squeeze())
-                
-                out_pred = model.decoder(latents, None)
-                out_graph = model.classifier(latents.z)
+            for k in range(latents.z.shape[0]):
                 
                 # Decoder the prediction
-                beam_sim.decode_x(d, out_pred.x_pred)
+                beam_sim.decode_x(d, x_out.x_pred[k:k+1, :])
                                 
                 # mj_step can be replaced with code that also evaluates
                 # a policy and applies a control signal before stepping the physics.
@@ -196,17 +221,13 @@ def main():
                 viewer.sync()   
                 
                 # Rudimentary time keeping, will drift relative to wall clock.
-                time.sleep(0.5)
-                
-                counter += 1
+                time.sleep(0.1)
+            
             
             # Stack gradients
-            gradient_traj = np.vstack(grad_list)
             latent_traj = np.vstack(latent_list)
             loss_traj = np.vstack(loss_lst)
-            loss_mse_traj = np.vstack(loss_mse_lst)
-            loss_graph_traj = np.vstack(loss_graph_lst)
-            
+
             print(np.std(latent_traj, 0))
             
             i, j = latent_dims[0], latent_dims[1]
@@ -223,8 +244,6 @@ def main():
                 
             plt.figure()
             plt.plot(loss_traj, label="total")
-            plt.plot(loss_mse_traj, label="mse loss")
-            plt.plot(loss_graph_traj, label="graph loss")
             plt.legend()
             plt.show()        
             

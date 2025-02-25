@@ -41,23 +41,29 @@ class BeamActMax(ActivationMaximisation):
         graph0 = model._classifier.forward(z0.unsqueeze(0))
         
         # Graph targets
-        graph_targets = torch.zeros([traj_len, 
+        graph_targets = torch.zeros([len(set_points), 
                                     model.vae_params.no_classifier_nodes, 
                                     model.vae_params.no_classifier_nodes], dtype=torch.float32).to(self._device)
         graph_targets[0, :, :] = graph0.clone()
         
         k = 0
-        for set_point in set_points:
-            for _ in range(set_point.no_iters):
-                graph_targets[k + 1, :, :] = set_point.graph_target.to(self._device)
-                # Iterate counter
-                k += 1
+        graph_indices = []
+        cumaltive_iters = 0
+        for i, set_point in enumerate(set_points):
+            cumaltive_iters += set_point.no_iters
+            graph_targets[i, :, :] = set_point.graph_target.to(self._device)
+            graph_indices.append(cumaltive_iters)
+            # for _ in range(set_point.no_iters):
+            #     graph_targets[k + 1, :, :] = set_point.graph_target.to(self._device)
+            #     # Iterate counter
+            #     k += 1
                 
         # Create smoothness loss to penalize jerk
-        A_mat = torch.matmul(self.vel_constraint(traj_len - 2, x_features),
-                            torch.matmul(self.vel_constraint(traj_len - 1, x_features),
-                            self.vel_constraint(traj_len, x_features)))     
-        x_vel_tar = torch.zeros((x_features * (traj_len - 3), 1), dtype=torch.float32).to(self._device)
+        # A_mat = torch.matmul(self.vel_constraint(traj_len - 2, x_features),
+        #                     torch.matmul(self.vel_constraint(traj_len - 1, x_features),
+        #                     self.vel_constraint(traj_len, x_features)))     
+        A_mat = self.vel_constraint(traj_len, x_features)
+        x_vel_tar = torch.zeros((x_features * (traj_len - 1), 1), dtype=torch.float32).to(self._device)
         
         latents = LatentVarsBase()
         latents.z = z_traj
@@ -74,8 +80,10 @@ class BeamActMax(ActivationMaximisation):
             
             graph_pred = model._classifier.forward(latents.z)
             x_out = model.decoder(latents, None)
-            self._loss = graph_loss(graph_pred, graph_targets) + \
-                            0.1 * mse_loss(torch.matmul(A_mat, x_out.x_pred.reshape(-1, 1)), x_vel_tar)
+            # self._loss = graph_loss(graph_pred, graph_targets) + \
+            #                 0.1 * mse_loss(torch.matmul(A_mat, x_out.x_pred.reshape(-1, 1)), x_vel_tar)
+            self._loss = graph_loss(graph_pred[graph_indices, :, :], graph_targets) + \
+                            10.0 * mse_loss(torch.matmul(A_mat, x_out.x_pred.reshape(-1, 1)), x_vel_tar)
                             
             grad_features = grad(outputs=self._loss, inputs=latents.z, retain_graph=True)[0]
             grad_features[0, :] *= 0.0

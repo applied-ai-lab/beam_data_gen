@@ -16,7 +16,7 @@ from torch.nn import functional as F
 
 from vae_planner.argparse_yaml_loader.yaml_loader import YamlLoader
 from vae_planner.models.encoder_base import EncoderBase
-from vae_planner.activation_maximisation.act_max import (ActivationMaximisation, ActMaxParams, ActMaxOutput)
+from vae_planner.activation_maximisation.act_max import (ActMaxParams, ActMaxOutput)
 
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
 from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
@@ -28,6 +28,7 @@ from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
                                               BeamDecoder, BeamGraphClassifier)
 from beam_data_gen.latent_space.latent_inspector import BeamLSInspector
 from beam_data_gen.simulator.beam_robot_sim import BeamRobotSim
+from beam_data_gen.activation_maximisation.beam_act_max import BeamActMax
 
 
 def main():
@@ -87,7 +88,7 @@ def main():
         
     # AM for ls
     act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-1, 100, 0.2)
-    act_max = ActivationMaximisation(act_max_params, vae_params.device)    
+    act_max = BeamActMax(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
     
@@ -200,6 +201,14 @@ def main():
     
     x_out = model.decoder(latents, None)
     out_graph = model._classifier.forward(latents.z)
+    
+    # Optimise z traj again for primal
+    out  = act_max.optimise_primal(model, latents, out_graph.detach().clone())
+    
+    latents.z = out.z
+    
+    x_out = model.decoder(latents, None)
+    out_graph = model._classifier.forward(latents.z)    
         
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
@@ -227,6 +236,8 @@ def main():
             # Stack gradients
             latent_traj = np.vstack(latent_list)
             loss_traj = np.vstack(loss_lst)
+            
+            latent_primal_traj = latents.z.detach().cpu().numpy()
 
             print(np.std(latent_traj, 0))
             
@@ -239,12 +250,21 @@ def main():
             title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
             fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
             
+            prop_cycle = plt.rcParams['axes.prop_cycle']
+            
             for axis in axes:
-                axis.plot(latent_traj[:, i], latent_traj[:, j], color='k')
+                axis.plot(latent_traj[:, i], latent_traj[:, j])
+                axis.plot(latent_primal_traj[:, i], latent_primal_traj[:, j], alpha=0.5)
                 
             plt.figure()
             plt.plot(loss_traj, label="total")
+            plt.plot(out.loss.detach().cpu().numpy())
             plt.legend()
+            
+            plt.figure()
+            plt.plot(latent_traj)
+            plt.plot(latent_primal_traj)
+            
             plt.show()        
             
                         

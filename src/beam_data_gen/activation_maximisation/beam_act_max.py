@@ -95,6 +95,51 @@ class BeamActMax(ActivationMaximisation):
         
         return ActMaxOutput(latents.z, tot_loss, copy.deepcopy(self._counter))
     
+    def optimise_primal(self, model: BeamVae, latents: LatentVarsBase, graph_targets: torch.tensor):
+        
+        traj_len = latents.z.shape[0]
+        # Predict graph features
+        graph_pred = model._classifier.forward(latents.z)
+        
+        # Number of x features
+        # no_features = model.vae_params.output_dim
+        no_features = latents.z.shape[1]
+        
+        # Smoothness in LS loss
+        A_mat = self.vel_constraint(latents.z.shape[0], latents.z.shape[1])
+        # A_mat = torch.matmul(self.vel_constraint(traj_len - 2, no_features),
+        #                     torch.matmul(self.vel_constraint(traj_len - 1, no_features),
+        #                     self.vel_constraint(traj_len, no_features)))     
+        vel_tar = torch.zeros([A_mat.shape[0], 1], dtype=torch.float32).to(self._device)
+        
+        self._counter = 0
+        self._loss[0] = 1000
+        
+        mse_loss = nn.MSELoss(reduction='sum')
+        graph_loss = nn.BCEWithLogitsLoss()       
+        
+        tot_loss = torch.zeros([self._params.max_iters], dtype=torch.float32).to(self._device)       
+        
+        while self._counter < self._params.max_iters and torch.norm(self._loss) > self._params.stop_criterion:
+            
+            graph_pred = model._classifier.forward(latents.z)
+            x_out = model.decoder(latents, None)
+            self._loss = 0.01 * graph_loss(graph_pred, graph_targets) + \
+                            0.1 * mse_loss(torch.matmul(A_mat, latents.z.reshape(-1, 1)), vel_tar)
+                            
+            grad_features = grad(outputs=self._loss, inputs=latents.z, retain_graph=True)[0]
+            grad_features[0, :] *= 0.0
+            grad_features[-1, :] *= 0.0
+            
+            latents.z = latents.z - self._params.lr * grad_features
+            
+            tot_loss[self._counter] = self._loss
+            self._counter += 1
+        
+        return ActMaxOutput(latents.z, tot_loss, copy.deepcopy(self._counter))         
+        
+    # Helper functions
+    
     def vel_constraint(self, traj_len: int, no_features: int):
         # Create smoothness loss
         A0 = - torch.cat([torch.eye((traj_len - 1) * no_features), 

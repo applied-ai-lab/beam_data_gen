@@ -149,6 +149,8 @@ def main():
         latent_list.append(latents.z.detach().cpu().numpy().squeeze())
         latent_torch_list.append(latents.z.clone())
         
+        counter += 1
+        
     # Set new graph target
     # Graph Target
     graph = l_pin_removed_robot
@@ -170,6 +172,8 @@ def main():
         loss_lst.append(loss.detach().cpu().numpy())
         latent_list.append(latents.z.detach().cpu().numpy().squeeze())
         latent_torch_list.append(latents.z.clone())
+        
+        counter += 1
         
     
     # Set new graph target
@@ -193,6 +197,8 @@ def main():
         loss_lst.append(loss.detach().cpu().numpy())
         latent_list.append(latents.z.detach().cpu().numpy().squeeze())
         latent_torch_list.append(latents.z.clone())
+        
+        counter += 1
     
     latents_torch = torch.cat(latent_torch_list,dim=0)
     

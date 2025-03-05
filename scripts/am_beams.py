@@ -2,6 +2,7 @@ import argparse
 import time
 import copy
 import os
+from itertools import cycle
 
 import torch
 from torch import nn
@@ -258,8 +259,9 @@ def main():
             
             prop_cycle = plt.rcParams['axes.prop_cycle']
             
+            # Plot 2D trajectories
             for axis in axes:
-                axis.plot(latent_traj[:, i], latent_traj[:, j])
+                axis.plot(latent_traj[:, i], latent_traj[:, j], marker="*")
                 axis.plot(latent_primal_traj[:, i], latent_primal_traj[:, j], alpha=0.5)
                 
             plt.figure()
@@ -268,8 +270,9 @@ def main():
             plt.legend()
             
             plt.figure()
-            plt.plot(latent_traj)
-            plt.plot(latent_primal_traj)
+            for k, sty in zip(range(len(latent_dims)), cycle(prop_cycle)):
+                plt.plot(latent_traj[:, k], **sty, marker="*")
+                plt.plot(latent_primal_traj[:, k], **sty)
             
             plt.show()        
             

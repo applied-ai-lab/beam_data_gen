@@ -3,13 +3,15 @@ from typing import List
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from beam_data_gen.beam_impl.robot_graph import RobotGraph
+from beam_data_gen.beam_impl.robot_graph import RobotGraph, RampGraph
 from beam_data_gen.models.beam_dataset import ProcessData
 
 
 class BeamRobotSim:
     def __init__(self, process_data: ProcessData):
         self._data_processor = process_data
+        
+        self._node_pose_dict = {}
     
     def pose_to_q(self, trans, rot):
         pose = np.zeros(7)
@@ -28,7 +30,12 @@ class BeamRobotSim:
         q_pos[21:28] = self.pose_to_q(q_pos_dict["robot_left_hand"].trans, q_pos_dict["robot_left_hand"].orient)
         q_pos[28:35] = self.pose_to_q(q_pos_dict["robot_right_hand"].trans, q_pos_dict["robot_right_hand"].orient)
         return q_pos
-
+    
+    def graph_to_pose_dict(self, ramp_graph: RampGraph):
+        nodes_data = ramp_graph.node_lst
+        for (node, data) in nodes_data:
+            self._node_pose_dict[node] = data["pose"]
+        return self._node_pose_dict
         
     def check_graph_collisions(self, data, ramp_graph: RobotGraph):
         collision = False

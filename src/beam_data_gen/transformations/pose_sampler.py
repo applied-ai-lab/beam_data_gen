@@ -10,13 +10,17 @@ class PoseSampler:
 
     def generate_smooth_velocities(self, num_samples, time_span, seed=None):
         """Generate smooth linear and angular velocities using interpolation."""
+        
+        assert num_samples >= 5, f"The number of samples must be greater than 5, current value is {num_samples}."
+        
         if seed:
             np.random.seed(seed)
 
         t = np.linspace(0, time_span, num_samples)
         
         # Generate random control points for smooth interpolation
-        control_t = np.linspace(0, time_span, num_samples // 5)  # Fewer control points
+        num_ctrl_pnts = max(num_samples // 5, 5)
+        control_t = np.linspace(0, time_span, num_ctrl_pnts)  # Fewer control points
         control_v = np.random.randn(len(control_t), 6) * 0.5  # 6D velocity (linear + angular)
 
         # Interpolate for smooth motion

@@ -4,9 +4,42 @@ from scipy.spatial.transform import Rotation as R
 from scipy.ndimage import gaussian_filter1d
 
 
+class PoseSamplerParams:
+    """ Class for parameters for generating pose samples
+    """
+    def __init__(self, no_samples, duration, seed, velocity_mask):
+        # Protected
+        self.no_samples = no_samples
+        self.duration = duration
+        self.seed = seed
+        self._velocity_mask = velocity_mask
+        # Private
+        self._dt = None
+        
+    @property
+    def dt(self):
+        self._dt = float(self.duration / self.no_samples)
+        return self._dt
+
+
 class PoseSampler:
     def __init__(self):
         pass
+    
+    def generate_smooth_transforms(self, params: PoseSamplerParams) -> np.array:
+        """ Generate smooth transforms (quaternion form x,y,z,x,y,z,w)
+
+        Args:
+            params (PoseSamplerParams): Parameter class 
+
+        Returns:
+            np.array: Poses with shape [traj_len, quat]
+        """
+        _, vel = self.generate_smooth_velocities(params.no_samples, params.duration, params.seed)
+        vel *= params._velocity_mask
+        init_pose = np.array([0, 0, 0, 0, 0, 0, 1])
+        poses = self.apply_velocities_to_poses(init_pose, vel, params.dt)
+        return poses
 
     def generate_smooth_velocities(self, num_samples, time_span, seed=None):
         """Generate smooth linear and angular velocities using interpolation."""

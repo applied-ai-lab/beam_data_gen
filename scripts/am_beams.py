@@ -20,7 +20,7 @@ from vae_planner.models.encoder_base import EncoderBase
 from vae_planner.activation_maximisation.act_max import (ActMaxParams, ActMaxOutput)
 
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
-from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
+from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.beam_train_params import TrainParams
 from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
@@ -261,8 +261,8 @@ def main():
             
             # Plot 2D trajectories
             for axis in axes:
-                axis.plot(latent_traj[:, i], latent_traj[:, j], marker="*")
-                axis.plot(latent_primal_traj[:, i], latent_primal_traj[:, j], alpha=0.5)
+                # axis.plot(latent_traj[:, i], latent_traj[:, j], marker="*")
+                axis.plot(latent_primal_traj[:, i], latent_primal_traj[:, j], alpha=1.0, color="k")
                 
             plt.figure()
             plt.plot(loss_traj, label="total")

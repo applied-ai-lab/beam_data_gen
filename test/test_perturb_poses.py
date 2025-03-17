@@ -10,7 +10,7 @@ from beam_data_gen.transformations.pose_sampler import PoseSampler, PoseSamplerP
 from beam_data_gen.beam_sampler import BeamSampler
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot, RobotGraph)
 from beam_data_gen.simulator.beam_robot_sim import BeamRobotSim
-from beam_data_gen.models.beam_dataset import ProcessData
+from beam_data_gen.models.datasets.beam_dataset import ProcessData
 
 
 def main():

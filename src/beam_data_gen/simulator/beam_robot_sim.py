@@ -4,7 +4,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from beam_data_gen.beam_impl.robot_graph import RobotGraph, RampGraph
-from beam_data_gen.models.beam_dataset import ProcessData
+from beam_data_gen.models.datasets.beam_dataset import ProcessData
 
 
 class BeamRobotSim:

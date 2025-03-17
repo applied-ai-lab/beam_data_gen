@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
 
-from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
+from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.simulator.beam_robot_sim import BeamRobotSim
 
 

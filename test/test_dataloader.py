@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from beam_data_gen.models.beam_dataset import BeamDataset, ProcessData
+from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
 
 
 def main():

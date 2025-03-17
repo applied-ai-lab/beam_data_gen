@@ -6,7 +6,7 @@ def test_datasaver():
     
     datasaver = DataSaver(l_connected_graph)
     
-    datasaver.append_to_graph(l_connected_graph)
+    datasaver.append_graph(l_connected_graph)
     
     df = datasaver.df
     

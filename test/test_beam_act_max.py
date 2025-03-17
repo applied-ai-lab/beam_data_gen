@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 from vae_planner.argparse_yaml_loader.yaml_loader import YamlLoader
 from beam_data_gen.activation_maximisation.beam_act_max import (BeamActMax, BeamSetPoint, 
                                                                 ActMaxParams, ActMaxOutput)
-from beam_data_gen.models.beam_vae_pp import (BeamVae, BeamVaeParams, TrainParams, 
+from beam_data_gen.models.vaes.beam_vae_pp import (BeamVae, BeamVaeParams, TrainParams, 
                                             BeamDecoder, BeamGraphClassifier)
 from vae_planner.models.encoder_base import EncoderBase
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)

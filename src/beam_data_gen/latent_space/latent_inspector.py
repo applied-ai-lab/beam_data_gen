@@ -4,7 +4,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from vae_planner.latent_space.latent_inspector import LatentInspector
 
-from beam_data_gen.models.beam_vae_pp import BeamVae, BeamVaeParams, BeamVaeInputs
+from beam_data_gen.models.vaes.beam_vae_pp import BeamVae, BeamVaeParams, BeamVaeInputs
 from beam_data_gen.beam_impl.robot_graph import RampGraph, RobotGraph
 from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected)
 

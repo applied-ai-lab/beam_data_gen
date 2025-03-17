@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.autograd import grad
 
-from beam_data_gen.models.beam_vae_pp import BeamVae, LatentVarsBase
+from beam_data_gen.models.vaes.beam_vae_pp import BeamVae, LatentVarsBase
 
 from vae_planner.activation_maximisation.act_max import (ActivationMaximisation, ActMaxOutput, ActMaxParams)
 

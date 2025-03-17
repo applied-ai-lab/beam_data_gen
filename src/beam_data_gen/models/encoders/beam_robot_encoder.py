@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 from vae_planner.models.encoder_base import EncoderBase
 
-from beam_data_gen.models.beam_robot_containers import (BeamRobotInputs, BeamRobotLatents, BeamRobotOutputs)
+from beam_data_gen.models.containers.beam_robot_containers import (BeamRobotInputs, BeamRobotLatents, BeamRobotOutputs)
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 
 

@@ -1,11 +1,11 @@
 import torch
 
-from beam_data_gen.models.beam_robot_encoder import (BeamRobotEncoder, BeamRobotInputs)
-from beam_data_gen.models.beam_robot_containers import (BeamRobotInputs, BeamRobotLatents, BeamRobotOutputs)
-from beam_data_gen.models.beam_vae_pp import (BeamVaeParams, TrainParams,
+from beam_data_gen.models.encoders.beam_robot_encoder import (BeamRobotEncoder, BeamRobotInputs)
+from beam_data_gen.models.containers.beam_robot_containers import (BeamRobotInputs, BeamRobotLatents, BeamRobotOutputs)
+from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams, TrainParams,
                                               BeamVae, BeamDecoder, 
                                               BeamGraphClassifier)
-from beam_data_gen.models.beam_robot_vae import BeamRobotVae
+from beam_data_gen.models.vaes.beam_robot_vae import BeamRobotVae
 
 
 def test_vae():

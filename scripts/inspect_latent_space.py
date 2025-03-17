@@ -21,7 +21,7 @@ from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_remove
 from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
-from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
+from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
                                               BeamDecoder, BeamGraphClassifier)

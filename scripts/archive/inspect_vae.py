@@ -12,11 +12,11 @@ from vae_planner.models.encoder_base import EncoderBase
 from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
-from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
+from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
                                               BeamDecoder, BeamGraphClassifier)
-from beam_data_gen.models.beam_robot_vae import(BeamRobotVae, BeamRobotLatents, BeamRobotEncoder)
+from beam_data_gen.models.vaes.beam_robot_vae import(BeamRobotVae, BeamRobotLatents, BeamRobotEncoder)
 
 
 def main():

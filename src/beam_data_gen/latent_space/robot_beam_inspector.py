@@ -6,8 +6,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from beam_data_gen.latent_space.latent_inspector import BeamLSInspector
-from beam_data_gen.models.beam_containers import LatentVarsBase
-from beam_data_gen.models.beam_robot_vae import BeamRobotVae, BeamVaeParams, BeamRobotInputs, BeamRobotLatents
+from beam_data_gen.models.containers.beam_containers import LatentVarsBase
+from beam_data_gen.models.vaes.beam_robot_vae import BeamRobotVae, BeamVaeParams, BeamRobotInputs, BeamRobotLatents
 
 
 class RobotBeamLSInspector(BeamLSInspector):

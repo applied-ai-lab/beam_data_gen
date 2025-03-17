@@ -102,7 +102,7 @@ def main():
                         
                         # Save data
                         if not check_graph_collisions(d, graph):
-                            datasaver.append_to_graph(graph)
+                            datasaver.append_graph(graph)
                             counter += 1
                         
                         # Resample a pose

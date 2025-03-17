@@ -16,7 +16,7 @@ class DataSaver:
         
         self._pose = np.zeros(7) # pose [xyz, q_xyzw]
         
-    def append_to_graph(self, ramp_graph: RampGraph):
+    def append_graph(self, ramp_graph: RampGraph):
         data_lst = []
         for node_name in self._node_names:
             pose_data = ramp_graph.graph.nodes[node_name]["pose"]

@@ -21,8 +21,8 @@ from vae_planner.activation_maximisation.act_max import (ActivationMaximisation,
 from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected, RampGraph)
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
 from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
-from beam_data_gen.models.beam_vae_params import BeamVaeParams
-from beam_data_gen.models.beam_train_params import TrainParams
+from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
+from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,

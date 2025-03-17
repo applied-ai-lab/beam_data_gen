@@ -2,7 +2,7 @@ import torch
 
 from vae_planner.models.vae_base import VaeBase, LatentVarsBase, TrainParams
 
-from beam_data_gen.models.beam_vae_params import BeamVaeParams
+from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.beam_robot_containers import BeamRobotInputs, BeamRobotLatents, BeamRobotOutputs
 from beam_data_gen.models.beam_robot_encoder import BeamRobotEncoder
 from beam_data_gen.models.beam_decoder import BeamDecoder

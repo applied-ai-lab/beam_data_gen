@@ -1,4 +1,4 @@
-from beam_data_gen.data_saver import DataSaver
+from beam_data_gen.data_sampling.data_saver import DataSaver
 from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected)
 
 

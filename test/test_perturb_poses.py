@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from scipy.spatial.transform import Rotation as R
 
 from beam_data_gen.transformations.pose_sampler import PoseSampler, PoseSamplerParams
-from beam_data_gen.beam_sampler import BeamSampler
+from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot, RobotGraph)
 from beam_data_gen.simulator.beam_robot_sim import BeamRobotSim
 from beam_data_gen.models.datasets.beam_dataset import ProcessData

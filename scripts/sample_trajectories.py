@@ -9,8 +9,8 @@ from mujoco import MjModel, MjData
 import mujoco.viewer
 
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot, RobotGraph)
-from beam_data_gen.beam_sampler import BeamSampler, PoseSamplerParams
-from beam_data_gen.data_saver import DataSaver
+from beam_data_gen.data_sampling.beam_sampler import BeamSampler, PoseSamplerParams
+from beam_data_gen.data_sampling.data_saver import DataSaver
 
 
 def pose_to_q(trans, rot):

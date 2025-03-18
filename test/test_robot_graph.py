@@ -3,7 +3,7 @@ import copy
 from assembly_tools.utils import (plot_Adj, plot_graph, plt)
 
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
-from beam_data_gen.beam_sampler import BeamSampler
+from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 
 
 def print_node_data(node_data_lst):

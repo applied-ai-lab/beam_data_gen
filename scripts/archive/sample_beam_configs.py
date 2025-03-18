@@ -7,8 +7,8 @@ from mujoco import MjModel, MjData
 import mujoco.viewer
 
 from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected, RampGraph)
-from beam_data_gen.beam_sampler import BeamSampler
-from beam_data_gen.data_saver import DataSaver
+from beam_data_gen.data_sampling.beam_sampler import BeamSampler
+from beam_data_gen.data_sampling.data_saver import DataSaver
 
 
 def pose_to_q(trans, rot):

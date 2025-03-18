@@ -1,7 +1,7 @@
 from assembly_tools.utils import (plot_Adj, plot_graph, plt)
 
 from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected)
-from beam_data_gen.beam_sampler import BeamSampler
+from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 
 
 def print_node_data(node_data_lst):

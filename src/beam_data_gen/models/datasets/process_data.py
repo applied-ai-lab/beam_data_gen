@@ -5,6 +5,7 @@ import copy
 import numpy as np 
 import pandas as pd
 import torch
+from scipy.spatial.transform import Rotation as R
 
 
 
@@ -41,8 +42,8 @@ class ProcessData:
             x_denorm[:, state_dim*k + 4] = torch.atan2(x_pred[:, state_dim*k + 3], x_pred[:, state_dim*k + 4])
             
         return x_denorm        
-     
-    def __call__(self, dir_path, beam_names):
+    
+    def extract_data(self, dir_path, beam_names):
         pd_file_lst = self.load_data(dir_path)
         
         pose_lst = []
@@ -69,3 +70,6 @@ class ProcessData:
         poses = np.vstack(pose_lst)
         adj = np.vstack(adj_list)
         return poses, adj
+    
+    def __call__(self, dir_path, beam_names):
+        return self.extract_data(dir_path, beam_names)

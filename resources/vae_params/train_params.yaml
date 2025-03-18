@@ -2,7 +2,7 @@
 
 read_from_file    : False
 output_to_file    : True
-data_path         : "data/trajectories/"
+data_path         : "data/trajectories_big/"
 batch_size        : 256
 epochs            : 10000
 seed              : 42

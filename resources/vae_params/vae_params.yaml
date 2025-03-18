@@ -1,16 +1,16 @@
 # VAE params for training dual arm data
 
 no_beams                 : 3
-beam_latent_dim          : 2
+beam_latent_dim          : 10
 no_hands                 : 2
-robot_latent_dim         : 5
+robot_latent_dim         : 10
 no_classifier_nodes      : 5      
 action_dim               : 0
 state_dim                : 5
 no_inputs                : 5
 no_outputs               : 5
-in_path                  : "model_params/trajectories_robot/vae_0/vae_epoch_3500.pt"
-out_dir                  : "model_params/trajectories_robot/vae_0" 
+in_path                  : "model_params/trajectories_robot/vae_1/vae_epoch_4500.pt"
+out_dir                  : "model_params/trajectories_robot/vae_1" 
 data_freq                : 50.0
 enc_freq                 : 50.0 
 dec_freq                 : 50.0

@@ -72,8 +72,8 @@ def main():
     right_connections = copy.deepcopy(left_connections)
     
     # Set up parameters
-    no_samples = 100
-    duration = 10
+    no_samples = 1000
+    duration = 100
     params = PoseSamplerParams(no_samples, duration, None, np.array([1, 1, 0, 0, 0, 1]))
     
     datasaver_dict = {}
@@ -122,11 +122,6 @@ def main():
                         # Data saver append graph
                         datasaver.append_graph(graph)
                         
-                        # Rudimentary time keeping, will drift relative to wall clock.
-                        time_until_next_step = m.opt.timestep - (time.time() - step_start)
-                        if time_until_next_step > 0:
-                            time.sleep(0.1)
-                        
                         traj_counter += 1
                         
                     datasaver_dict[hand_idx] = [copy.deepcopy(datasaver.df)]
@@ -134,7 +129,7 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            data_df.to_pickle(os.path.join("data/trajectories", name + ".pkl"))           
+            data_df.to_pickle(os.path.join("data/trajectories_big", name + ".pkl"))           
 
     return 0
 

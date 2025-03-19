@@ -34,7 +34,7 @@ def extract_trajectory_segment(df, index, start, N):
 
 def main():
     
-    path = os.path.join("data/trajectories")
+    path = os.path.join("data/trajectories_big")
     
     no_inputs = 5
     no_outputs = 7

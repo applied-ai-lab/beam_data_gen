@@ -72,9 +72,11 @@ def main():
     right_connections = copy.deepcopy(left_connections)
     
     # Set up parameters
-    no_samples = 1000
-    duration = 100
+    no_samples = 50
+    duration = 5
     params = PoseSamplerParams(no_samples, duration, None, np.array([1, 1, 0, 0, 0, 1]))
+    
+    no_random_inits = 50
     
     datasaver_dict = {}
     
@@ -92,40 +94,44 @@ def main():
                     # Add hand connections
                     graph.add_hand("robot_right_hand", right_connection)
                     
-                    # Find trajectories
-                    sampler.move_hands(graph, params)
-                    traj_counter = 0
-                    
-                    # Create the datasaver
-                    datasaver = DataSaver(graph)
-                                    
-                    # Start loop and sample pose
-                    while viewer.is_running() and traj_counter < params.no_samples:
-                        step_start = time.time()
+                    for _ in range(no_random_inits):
+                        print(left_connection, right_connection, name)
                         
-                        # mj_step can be replaced with code that also evaluates
-                        # a policy and applies a control signal before stepping the physics.
-                        mujoco.mj_step(m, d)
+                        # Find trajectories
+                        sampler.move_hands(graph, params)
+                        traj_counter = 0
+                        
+                        # Create the datasaver
+                        datasaver = DataSaver(graph)
+                                        
+                        # Start loop and sample pose
+                        while viewer.is_running() and traj_counter < params.no_samples:
+                            
+                            # mj_step can be replaced with code that also evaluates
+                            # a policy and applies a control signal before stepping the physics.
+                            mujoco.mj_step(m, d)
 
-                        # Pick up changes to the physics state, apply perturbations, update options from GUI.
-                        viewer.sync()
-                        
-                        # Save data
-                        # if not check_graph_collisions(d, graph):
-                        
-                        # Sample a trajectory given the pose
-                        sampler.set_pose_with_traj(graph, traj_counter)
-                        
-                        pose_dict = sampler.graph_to_pose_dict(graph)
-                        set_q(d.qpos, pose_dict)  
-                        
-                        # Data saver append graph
-                        datasaver.append_graph(graph)
-                        
-                        traj_counter += 1
-                        
-                    datasaver_dict[hand_idx] = [copy.deepcopy(datasaver.df)]
-                    hand_idx += 1
+                            # Pick up changes to the physics state, apply perturbations, update options from GUI.
+                            viewer.sync()
+                            
+                            # Save data
+                            # if not check_graph_collisions(d, graph):
+                            
+                            # Sample a trajectory given the pose
+                            sampler.set_pose_with_traj(graph, traj_counter)
+                            
+                            pose_dict = sampler.graph_to_pose_dict(graph)
+                            set_q(d.qpos, pose_dict)  
+                            
+                            # Data saver append graph
+                            datasaver.append_graph(graph)
+                            
+                            traj_counter += 1
+                            
+                            # time.sleep(0.5)
+                            
+                        datasaver_dict[hand_idx] = [copy.deepcopy(datasaver.df)]
+                        hand_idx += 1
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data

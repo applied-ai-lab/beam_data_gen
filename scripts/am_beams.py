@@ -6,6 +6,7 @@ from itertools import cycle
 
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 from torch import optim
 import numpy as np
 from matplotlib import pyplot as plt
@@ -20,7 +21,7 @@ from vae_planner.models.encoder_base import EncoderBase
 from vae_planner.activation_maximisation.act_max import (ActMaxParams, ActMaxOutput)
 
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
-from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
+from beam_data_gen.models.datasets.trajectory_dataset import TrajectoryDataset, ProcessTrajectories
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
@@ -41,7 +42,7 @@ def main():
     vae_params = BeamVaeParams(vae_args)
     train_params = TrainParams(train_args)
     
-    data_processor = ProcessData(np.array(vae_params.pos_lims))
+    data_processor = ProcessTrajectories(np.array(vae_params.pos_lims), vae_params.device)
     
     beam_sim = BeamRobotSim(data_processor)
     
@@ -60,20 +61,19 @@ def main():
     latent_inspector = BeamLSInspector(model, vae_params)
     
     # Load test data
-    process_data = ProcessData(vae_params.pos_lims)
+    process_data = ProcessTrajectories(vae_params.pos_lims, vae_params.device)
     poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
     
     no_inputs = 1000
-    rand_indices = np.random.choice(poses.shape[0], size=no_inputs)
+    dataset = TrajectoryDataset(poses, flat_adj, vae_params.no_inputs, vae_params.no_outputs)
+    loader = DataLoader(dataset, batch_size=no_inputs, shuffle=True)
     
+    x_in, x_out, adj_mat = next(iter(loader))
     
     # Model inputs
     model_inputs = BeamVaeInputs()
-    model_inputs.x_in = torch.tensor(poses[rand_indices, :], dtype=torch.float32).to(vae_params.device)
-    model_inputs.graph_edge_targets = torch.tensor(flat_adj[rand_indices, :].reshape(-1, 
-                                                                    vae_params.no_classifier_nodes, 
-                                                                    vae_params.no_classifier_nodes), 
-                                                    dtype=torch.float32).to(vae_params.device) 
+    model_inputs.x_in = x_in
+    model_inputs.graph_edge_targets = adj_mat
 
     (latent_dims, mean_var) = latent_inspector.find_latent_dims(model_inputs)
     
@@ -88,7 +88,7 @@ def main():
     
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-1, 100, 0.2)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.02)
     act_max = BeamActMax(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
@@ -105,7 +105,7 @@ def main():
     out_pred = model.decoder(latents, None)
     out_graph = model.classifier(latents.z)
             
-    denorm_out = data_processor.denorm_output(out_pred.x_pred)
+    # denorm_out = data_processor.denorm_output(out_pred.x_pred)
     
     # Graph Target
     graph = l_pin_removed_robot

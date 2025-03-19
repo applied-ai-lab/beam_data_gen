@@ -5,6 +5,7 @@ import os
 
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 import numpy as np
 from matplotlib import pyplot as plt
 import mujoco
@@ -18,7 +19,7 @@ from vae_planner.models.encoder_base import EncoderBase
 
 from beam_data_gen.beam_impl.L_beam import (l_connected_graph, l_pin_removed, l_disconnected, RampGraph)
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
-from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
+from beam_data_gen.models.datasets.trajectory_dataset import TrajectoryDataset, ProcessTrajectories
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
@@ -35,10 +36,7 @@ def main():
     vae_args, train_args = YamlLoader(parser).return_args()
 
     vae_params = BeamVaeParams(vae_args)
-    train_params = TrainParams(train_args)
-    
-    data_processor = ProcessData(np.array(vae_params.pos_lims))
-    
+    train_params = TrainParams(train_args)    
 
     model = BeamVae(vae_params, 
                 train_params,
@@ -54,20 +52,19 @@ def main():
     latent_inspector = BeamLSInspector(model, vae_params)
     
     # Load test data
-    process_data = ProcessData(vae_params.pos_lims)
+    process_data = ProcessTrajectories(vae_params.pos_lims, vae_params.device)
     poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
     
     no_inputs = 1000
-    rand_indices = np.random.choice(poses.shape[0], size=no_inputs)
-
+    dataset = TrajectoryDataset(poses, flat_adj, vae_params.no_inputs, vae_params.no_outputs)
+    loader = DataLoader(dataset, batch_size=no_inputs, shuffle=True)
+    
+    x_in, x_out, adj_mat = next(iter(loader))
     
     # Model inputs
     model_inputs = BeamVaeInputs()
-    model_inputs.x_in = torch.tensor(poses[rand_indices, :], dtype=torch.float32).to(vae_params.device)
-    model_inputs.graph_edge_targets = torch.tensor(flat_adj[rand_indices, :].reshape(-1, 
-                                                                    vae_params.no_classifier_nodes, 
-                                                                    vae_params.no_classifier_nodes), 
-                                                    dtype=torch.float32).to(vae_params.device) 
+    model_inputs.x_in = x_in
+    model_inputs.graph_edge_targets = adj_mat
 
     (latent_dims, mean_var) = latent_inspector.find_latent_dims(model_inputs)
     
@@ -91,7 +88,7 @@ def main():
             title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
             fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
             
-            file_path = os.path.join('figures', 'latent_space', f'VAE_11_latent_{i}_{j}')
+            file_path = os.path.join('figures', 'latent_space', f'VAE_0_latent_{i}_{j}')
             print(file_path)
             plt.savefig(file_path)
             

@@ -72,11 +72,11 @@ def main():
     right_connections = copy.deepcopy(left_connections)
     
     # Set up parameters
-    no_samples = 50
-    duration = 5
-    params = PoseSamplerParams(no_samples, duration, None, np.array([1, 1, 0, 0, 0, 1]))
+    dt = 0.2
+    duration = 1.5
+    params = PoseSamplerParams(dt, duration, None, np.array([1, 1, 0, 0, 0, 1]))
     
-    no_random_inits = 50
+    no_random_inits = 200
     
     datasaver_dict = {}
     
@@ -135,7 +135,7 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            data_df.to_pickle(os.path.join("data/trajectories_big", name + ".pkl"))           
+            data_df.to_pickle(os.path.join("data/trajectories_big_1", name + ".pkl"))           
 
     return 0
 

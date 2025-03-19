@@ -7,19 +7,19 @@ from scipy.ndimage import gaussian_filter1d
 class PoseSamplerParams:
     """ Class for parameters for generating pose samples
     """
-    def __init__(self, no_samples, duration, seed, velocity_mask):
+    def __init__(self, dt, duration, seed, velocity_mask):
         # Protected
-        self.no_samples = no_samples
+        self.dt = dt
         self.duration = duration
         self.seed = seed
         self._velocity_mask = velocity_mask
         # Private
-        self._dt = None
+        self._no_samples = None
         
     @property
-    def dt(self):
-        self._dt = float(self.duration / self.no_samples)
-        return self._dt
+    def no_samples(self):
+        self._no_samples = int(self.duration / self.dt)
+        return self._no_samples
 
 
 class PoseSampler:

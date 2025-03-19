@@ -63,7 +63,7 @@ class TrajectoryDataset(Dataset):
         x_out = self._data['poses'][key_index][traj_index + self._no_inputs: traj_index + self._no_inputs + self._no_outputs, :]
         
         adj_mat = self._data['flat_adj'][key_index][traj_index + self._no_inputs].reshape(self._no_nodes, self._no_nodes)
-        return x_in, x_out, adj_mat
+        return x_in.reshape(-1), x_out.reshape(-1), adj_mat
             
             
 

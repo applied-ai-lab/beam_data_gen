@@ -43,6 +43,8 @@ class BeamSampler:
         return ramp_graph.check_graph()
     
     def move_hands(self, ramp_graph: RampGraph, params: PoseSamplerParams):
+        # Perturb graph
+        self.sample_poses(ramp_graph, self.uniform_pose_sampler)
         # Get the graph
         G = ramp_graph.graph
         # Find the subgraphs

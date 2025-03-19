@@ -53,7 +53,7 @@ class PoseSampler:
         # Generate random control points for smooth interpolation
         num_ctrl_pnts = max(num_samples // 5, 5)
         control_t = np.linspace(0, time_span, num_ctrl_pnts)  # Fewer control points
-        control_v = np.random.randn(len(control_t), 6) * 0.5  # 6D velocity (linear + angular)
+        control_v = np.random.randn(len(control_t), 6) * 0.25  # 6D velocity (linear + angular)
 
         # Interpolate for smooth motion
         smooth_v = np.array([

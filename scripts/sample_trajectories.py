@@ -73,10 +73,10 @@ def main():
     
     # Set up parameters
     dt = 0.2
-    duration = 1.5
+    duration = 3.0
     params = PoseSamplerParams(dt, duration, None, np.array([1, 1, 0, 0, 0, 1]))
     
-    no_random_inits = 200
+    no_random_inits = 1000
     
     datasaver_dict = {}
     

@@ -9,8 +9,8 @@ action_dim               : 0
 state_dim                : 5
 no_inputs                : 6
 no_outputs               : 6
-in_path                  : "model_params/trajectories_robot/vae_8/vae_epoch_3000.pt"
-out_dir                  : "model_params/trajectories_robot/vae_8" 
+in_path                  : "model_params/trajectories_robot/vae_9/vae_epoch_1230.pt"
+out_dir                  : "model_params/trajectories_robot/vae_9" 
 data_freq                : 50.0
 enc_freq                 : 50.0 
 dec_freq                 : 50.0

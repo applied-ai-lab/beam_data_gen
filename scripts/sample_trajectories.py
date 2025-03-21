@@ -56,7 +56,7 @@ def main():
     d = mujoco.MjData(m)
 
     # Initialise the classes
-    trans_lims = [0.6, 0.6, 0.0]
+    trans_lims = [0.0, 0.0, 0.0]
     sampler = BeamSampler(trans_lims)
 
     # Beam config graph
@@ -73,10 +73,11 @@ def main():
     
     # Set up parameters
     dt = 0.2
-    duration = 3.0
-    params = PoseSamplerParams(dt, duration, None, np.array([1, 1, 0, 0, 0, 1]))
+    duration = 10.0
+    max_velocities = np.array([0.25, 0.25, 0.05, 0.25, 0.25, 0.25])
+    params = PoseSamplerParams(dt, duration, None, max_velocities, np.array([1, 1, 1, 0, 0, 1]))
     
-    no_random_inits = 1000
+    no_random_inits = 500
     
     datasaver_dict = {}
     
@@ -128,14 +129,17 @@ def main():
                             
                             traj_counter += 1
                             
-                            # time.sleep(0.5)
+                            # time.sleep(dt)
                             
                         datasaver_dict[hand_idx] = [copy.deepcopy(datasaver.df)]
                         hand_idx += 1
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            data_df.to_pickle(os.path.join("data/trajectories_big_1", name + ".pkl"))           
+            path_dir = os.path.join("data/trajectories_big_3")
+            if not os.path.exists(path_dir):
+                os.makedirs(path_dir)
+            data_df.to_pickle(os.path.join(path_dir, name + ".pkl"))           
 
     return 0
 

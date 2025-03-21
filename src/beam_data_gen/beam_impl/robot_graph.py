@@ -20,11 +20,11 @@ class RobotGraphParams(BeamBase):
             self._node_dict = {
                 self._id + "_left_hand": {'type': BeamTypeEnum.HAND, 
                                        'pose': PoseType(trans=np.array([0.316, 0.277, 0.08]), orient=R.from_quat([0, 0, 0, 1])),
-                                       '_l_p': PoseType(trans=np.array([0.316, 0.277, 0.08]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
+                                       '_l_p': PoseType(trans=np.array([0.0, 0.277 / 2, 0.16]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
                                        },
                 self._id + "_right_hand": {'type': BeamTypeEnum.HAND, 
-                                       'pose': PoseType(trans=np.array([0.316, -0.277, 0.08]), orient=R.from_quat([0, 0, 0, 1])),
-                                       '_l_p': PoseType(trans=np.array([0.316, -0.277, 0.08]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
+                                       'pose': PoseType(trans=np.array([0.0, 0.0, 0.08]), orient=R.from_quat([0, 0, 0, 1])),
+                                       '_l_p': PoseType(trans=np.array([0.0, -0.277 / 2, 0.16]), orient=R.from_quat([0, 0, 0, 1])) # Local pose
                                        }
             }
         return self._node_dict

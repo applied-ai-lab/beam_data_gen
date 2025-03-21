@@ -7,10 +7,10 @@ robot_latent_dim         : 10
 no_classifier_nodes      : 5      
 action_dim               : 0
 state_dim                : 5
-no_inputs                : 6
-no_outputs               : 6
-in_path                  : "model_params/trajectories_robot/vae_9/vae_epoch_1230.pt"
-out_dir                  : "model_params/trajectories_robot/vae_9" 
+no_inputs                : 20
+no_outputs               : 20
+in_path                  : "model_params/trajectories_robot/vae_10/vae_epoch_1200.pt"
+out_dir                  : "model_params/trajectories_robot/vae_10" 
 data_freq                : 50.0
 enc_freq                 : 50.0 
 dec_freq                 : 50.0

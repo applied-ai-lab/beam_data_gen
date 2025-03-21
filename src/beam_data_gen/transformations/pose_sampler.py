@@ -7,12 +7,13 @@ from scipy.ndimage import gaussian_filter1d
 class PoseSamplerParams:
     """ Class for parameters for generating pose samples
     """
-    def __init__(self, dt, duration, seed, velocity_mask):
+    def __init__(self, dt, duration, seed, max_velocities, velocity_mask):
         # Protected
         self.dt = dt
         self.duration = duration
         self.seed = seed
-        self._velocity_mask = velocity_mask
+        self.max_velocities = max_velocities
+        self.velocity_mask = velocity_mask
         # Private
         self._no_samples = None
         
@@ -20,6 +21,8 @@ class PoseSamplerParams:
     def no_samples(self):
         self._no_samples = int(self.duration / self.dt)
         return self._no_samples
+    
+    
 
 
 class PoseSampler:
@@ -35,25 +38,25 @@ class PoseSampler:
         Returns:
             np.array: Poses with shape [traj_len, quat]
         """
-        _, vel = self.generate_smooth_velocities(params.no_samples, params.duration, params.seed)
-        vel *= params._velocity_mask
+        _, vel = self.generate_smooth_velocities(params)
+        vel *= params.velocity_mask
         poses = self.apply_velocities_to_poses(init_pose_quat, vel, params.dt)
         return poses
 
-    def generate_smooth_velocities(self, num_samples, time_span, seed=None):
+    def generate_smooth_velocities(self, params: PoseSamplerParams):
         """Generate smooth linear and angular velocities using interpolation."""
         
-        assert num_samples >= 5, f"The number of samples must be greater than 5, current value is {num_samples}."
+        assert params.no_samples >= 5, f"The number of samples must be greater than 5, current value is {params.num_samples}."
         
-        if seed:
-            np.random.seed(seed)
+        if params.seed:
+            np.random.seed(params.seed)
 
-        t = np.linspace(0, time_span, num_samples)
+        t = np.linspace(0, params.duration, params.no_samples)
         
         # Generate random control points for smooth interpolation
-        num_ctrl_pnts = max(num_samples // 5, 5)
-        control_t = np.linspace(0, time_span, num_ctrl_pnts)  # Fewer control points
-        control_v = np.random.randn(len(control_t), 6) * 0.5  # 6D velocity (linear + angular)
+        num_ctrl_pnts = max(params.no_samples // 5, 5)
+        control_t = np.linspace(0, params.duration, num_ctrl_pnts)  # Fewer control points
+        control_v = np.random.randn(len(control_t), 6) * params.max_velocities  # 6D velocity (linear + angular)
 
         # Interpolate for smooth motion
         smooth_v = np.array([

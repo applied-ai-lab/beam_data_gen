@@ -19,6 +19,10 @@ class BeamRobotEncoder(EncoderBase):
             nn.ELU(),
             nn.Linear(self.vae_params.model_width, self.vae_params.model_width),
             nn.ELU(),
+            nn.Linear(self.vae_params.model_width, self.vae_params.model_width),
+            nn.ELU(),
+            nn.Linear(self.vae_params.model_width, self.vae_params.model_width),
+            nn.ELU(),
             nn.Linear(self.vae_params.model_width, 2*self.vae_params.beam_latent_dim),
 
         )
@@ -26,6 +30,10 @@ class BeamRobotEncoder(EncoderBase):
         self.hands = nn.Sequential(
 
             nn.Linear(self.vae_params.robot_input_dim, self.vae_params.model_width),
+            nn.ELU(),
+            nn.Linear(self.vae_params.model_width, self.vae_params.model_width),
+            nn.ELU(),
+            nn.Linear(self.vae_params.model_width, self.vae_params.model_width),
             nn.ELU(),
             nn.Linear(self.vae_params.model_width, self.vae_params.model_width),
             nn.ELU(),

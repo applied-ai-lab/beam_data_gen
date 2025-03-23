@@ -35,6 +35,9 @@ class TrajectoryDataset(Dataset):
         self._no_keys = len(pose_traj.keys())
         self._traj_len = pose_traj[0].shape[0]
         
+        assert (self._traj_len - self._no_inputs - self._no_outputs) > 0, \
+            "The sum no. of inputs and no. outputs are larger than the trajectory length in the data."
+        
         # Create data dict
         self._data = {'poses': pose_traj,
                         'flat_adj': adj_traj}

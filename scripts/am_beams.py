@@ -24,6 +24,7 @@ from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_remove
 from beam_data_gen.models.datasets.trajectory_dataset import TrajectoryDataset, ProcessTrajectories
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
+from beam_data_gen.models.encoders.beam_robot_encoder import BeamRobotEncoder
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
@@ -88,7 +89,7 @@ def main():
     
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.02)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.2)
     act_max = BeamActMax(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()
@@ -116,8 +117,8 @@ def main():
     
     graph_target = torch.tensor([adj_mat], dtype=torch.float32).to(vae_params.device)
     
-    print(adj_mat)
-    print(torch.sigmoid(out_graph).round())
+    print("Graph Target: \n", adj_mat)
+    print("Init Target: \n", torch.sigmoid(out_graph).round().detach().cpu().numpy())
     
     loss = torch.tensor([1000.0]).to(vae_params.device)
     loss_lst = []    
@@ -177,7 +178,7 @@ def main():
         counter += 1
         
     
-    # Set new graph target
+    # # Set new graph target
     # Graph Target
     graph = l_connected_robot
     graph.add_hand("robot_left_hand", "l_beam_1")
@@ -210,9 +211,9 @@ def main():
     out_graph = model._classifier.forward(latents.z)
     
     # Optimise z traj again for primal
-    out  = act_max.optimise_primal(model, latents, out_graph.detach().clone())
+    # out  = act_max.optimise_primal(model, latents, out_graph.detach().clone())
     
-    latents.z = out.z
+    # latents.z = out.z
     
     x_out = model.decoder(latents, None)
     out_graph = model._classifier.forward(latents.z)    
@@ -266,7 +267,7 @@ def main():
                 
             plt.figure()
             plt.plot(loss_traj, label="total")
-            plt.plot(out.loss.detach().cpu().numpy())
+            # plt.plot(out.loss.detach().cpu().numpy())
             plt.legend()
             
             plt.figure()

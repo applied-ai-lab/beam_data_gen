@@ -22,6 +22,7 @@ from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_remove
 from beam_data_gen.models.datasets.trajectory_dataset import TrajectoryDataset, ProcessTrajectories
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
+from beam_data_gen.models.encoders.beam_robot_encoder import BeamRobotEncoder
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
@@ -76,6 +77,7 @@ def main():
     latents_for_plotting.z = torch.zeros([no_samps, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device)
     
     print(latent_dims)
+    print(mean_var)
     
     for i in range(latent_dims.shape[0]):
         j = copy.deepcopy(i)

@@ -59,6 +59,12 @@ class BeamSampler:
                     data["traj"] = [copy.deepcopy(data["pose"])] * params.no_samples
             
             if BeamTypeEnum.HAND in type_lst:
+                
+                # Update params so that beams don't move vertically
+                if BeamTypeEnum.BEAM in type_lst:
+                    params.velocity_mask[2] = 0.0
+                else:
+                    params.velocity_mask[2] = 1.0
                     
                 # Generate a trajectory
                 trans, rot = self.uniform_pose_sampler()

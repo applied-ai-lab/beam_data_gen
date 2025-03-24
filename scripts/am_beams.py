@@ -7,6 +7,7 @@ from itertools import cycle
 import torch
 from torch import nn
 from torch import optim
+from torch.utils.data import DataLoader
 import numpy as np
 from matplotlib import pyplot as plt
 import mujoco
@@ -23,6 +24,8 @@ from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_remove
 from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
+from beam_data_gen.models.encoders.beam_robot_encoder import BeamRobotEncoder
+from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
@@ -59,21 +62,20 @@ def main():
     # Inspect Latent Space
     latent_inspector = BeamLSInspector(model, vae_params)
     
-    # Load test data
+        # Load test data
     process_data = ProcessData(vae_params.pos_lims)
     poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
     
     no_inputs = 1000
-    rand_indices = np.random.choice(poses.shape[0], size=no_inputs)
+    dataset = BeamDataset(poses, flat_adj, vae_params.device)
+    loader = DataLoader(dataset, batch_size=no_inputs, shuffle=True)
     
+    x_in, x_out, adj_mat = next(iter(loader))
     
     # Model inputs
     model_inputs = BeamVaeInputs()
-    model_inputs.x_in = torch.tensor(poses[rand_indices, :], dtype=torch.float32).to(vae_params.device)
-    model_inputs.graph_edge_targets = torch.tensor(flat_adj[rand_indices, :].reshape(-1, 
-                                                                    vae_params.no_classifier_nodes, 
-                                                                    vae_params.no_classifier_nodes), 
-                                                    dtype=torch.float32).to(vae_params.device) 
+    model_inputs.x_in = x_in
+    model_inputs.graph_edge_targets = adj_mat
 
     (latent_dims, mean_var) = latent_inspector.find_latent_dims(model_inputs)
     
@@ -96,7 +98,7 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
     d = mujoco.MjData(m)
     
-    latents.z = -1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_(True)
+    latents.z = 1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_(True)
     latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)
@@ -131,7 +133,7 @@ def main():
     latent_torch_list = []
     latents.z = latents.z.clone().detach().requires_grad_(True)
     latent_list.append(latents.z.detach().cpu().numpy().squeeze())
-    latent_torch_list.append(latents.z)    
+    latent_torch_list.append(latents.z.clone())    
     
     # Create optimiser
     optimizer = optim.SGD([latents.z], lr=act_max_params.lr)
@@ -249,6 +251,7 @@ def main():
             print(np.std(latent_traj, 0))
             
             i, j = latent_dims[0], latent_dims[1]
+            # i, j = 3, 4
             latents_for_plotting.z[:, i] = x
             latents_for_plotting.z[:, j] = y
 

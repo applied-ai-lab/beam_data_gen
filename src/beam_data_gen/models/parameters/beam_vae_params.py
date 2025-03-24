@@ -44,6 +44,8 @@ class BeamVaeParams(VaeParams):
         self.batch_first = False # Torch puts the batch after the trajectory length
 
         self.cuda = True # Use cuda or cpu
+        
+        self.split_encoder = False # Is the encoder split into multiple sub encoders
 
         if args is not None:
             self.set_from_args(args)
@@ -75,6 +77,7 @@ class BeamVaeParams(VaeParams):
         self.model_width = args.model_width
         self.batch_first = args.batch_first
         self.cuda = args.cuda
+        self.split_encoder = args.split_encoder
         
     @property
     def latent_dim(self) -> int:
@@ -92,8 +95,7 @@ class BeamVaeParams(VaeParams):
     
     @property
     def output_dim(self) -> int:
-        return (self.state_dim * self.no_outputs * self.no_beams) + \
-                (self.state_dim * self.no_outputs * self.no_hands)
+        return self.robot_output_dim + self.beam_ouput_dim
                 
     @property
     def beam_input_dim(self) -> int:
@@ -106,6 +108,14 @@ class BeamVaeParams(VaeParams):
     @property
     def decoder_input_dim(self) -> int:
         return self.latent_dim + self.action_dim
+    
+    @property
+    def robot_output_dim(self) -> int:
+        return self.state_dim * self.no_outputs * self.no_hands
+    
+    @property
+    def beam_ouput_dim(self) -> int:
+        return self.state_dim * self.no_outputs * self.no_beams
 
     @property
     def no_samps_to_skip(self) -> int: 

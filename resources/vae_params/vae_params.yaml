@@ -9,8 +9,8 @@ action_dim               : 0
 state_dim                : 5
 no_inputs                : 1
 no_outputs               : 1
-in_path                  : "model_params/beam_split_enc/vae_0/vae_epoch_3000.pt"
-out_dir                  : "model_params/beam_split_enc/vae_0" 
+in_path                  : "model_params/beam_split_enc/vae_1/vae_epoch_1600.pt"
+out_dir                  : "model_params/beam_split_enc/vae_1" 
 data_freq                : 50.0
 enc_freq                 : 50.0 
 dec_freq                 : 50.0

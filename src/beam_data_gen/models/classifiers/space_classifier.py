@@ -43,14 +43,7 @@ class SpaceClassifier(Classifier):
 
         )
         
-        # Classifier weights
-        self._loss_weights = (torch.ones([self.vae_params.no_classifier_nodes, 
-                                          self.vae_params.no_classifier_nodes], dtype=torch.float32)
-                              - 
-                              torch.eye(self.vae_params.no_classifier_nodes)
-                              ).to(self.vae_params.device)
-        
-        self._loss_crit = nn.BCEWithLogitsLoss(weight=self._loss_weights, reduction="sum")
+        self._loss_crit = nn.BCEWithLogitsLoss(reduction="sum")
         
     def graph_forward(self, inputs: torch.tensor):
         logits = self.graph_mlp(inputs)
@@ -82,8 +75,4 @@ class SpaceClassifier(Classifier):
     def get_offdiagonals(self, input: torch.tensor):
         mask = ~torch.eye(input.shape[1], dtype=torch.bool, device=input.device)
         return input[:, mask]
-    
-    @property
-    def loss_weights(self):
-        return self._loss_weights
     

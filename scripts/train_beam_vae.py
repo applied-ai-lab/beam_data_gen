@@ -12,11 +12,13 @@ from vae_planner.argparse_yaml_loader.yaml_loader import YamlLoader
 from vae_planner.models.encoder_base import EncoderBase
 
 from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
+from beam_data_gen.models.datasets.space_dataset import SpaceDataset
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.vaes.beam_vae_pp import BeamVae
 from beam_data_gen.models.classifiers.linear_classifier import LinearClassifier
 from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
+from beam_data_gen.models.classifiers.space_classifier import SpaceClassifier
 from beam_data_gen.models.vaes.beam_robot_vae import (BeamVaeParams,
                                                 BeamRobotVae, BeamRobotEncoder, BeamRobotLatents,
                                                 BeamRobotInputs, BeamRobotOutputs,
@@ -105,7 +107,7 @@ def main():
     poses, flat_adj = process_data(train_params.data_path, ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
 
     # Create dataset and dataloaders
-    dataset_class = BeamDataset(poses, flat_adj, device=vae_params.device)
+    dataset_class = SpaceDataset(poses, flat_adj, device=vae_params.device)
     ##########################################
     
     # Split training and test
@@ -115,9 +117,9 @@ def main():
 
     model = BeamVae(vae_params, 
                         train_params,
-                        BeamRobotEncoder,
-                        BeamRobotDecoder,
-                        BeamGraphClassifier).to(vae_params.device)
+                        EncoderBase,
+                        BeamDecoder,
+                        SpaceClassifier).to(vae_params.device)
     
     if train_params.read_from_file:
         model.load_state_dict(torch.load(vae_params.in_path))

@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import numpy as np
 
@@ -142,3 +144,104 @@ class BeamLSInspector(LatentInspector):
             self.reset_colour_dict(c_list)
         
         return fig, axes
+    
+    def plot_freespace_latents(self, 
+                               x: torch.tensor, 
+                               y: torch.tensor, 
+                               batched_graphs: torch.tensor, 
+                               left_free_space: torch.tensor,
+                               title: str=None):
+        # Convert values to numpy arrays
+        x_np = x.detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy()
+        graphs_np = batched_graphs.detach().cpu().detach().numpy()
+        
+        free_space_np = left_free_space.detach().cpu().detach().numpy()
+        
+        
+        # Create colours   
+        # beam_list = list(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, -3:, -3:])] for k in range(graphs_np.shape[0]))
+        
+        undefined_dict = {'colour': 'k', 
+                            'label': 'Undefined',
+                            'plotted': False}
+        
+        beam_list = []
+        for k in range(graphs_np.shape[0]):
+            try:
+                beam_list.append(self.beam_only_colours[self.adj_mat_to_key(graphs_np[k, -3:, -3:])])
+            except KeyError:
+                beam_list.append(undefined_dict)
+            
+        left_list = []
+        for k in range(graphs_np.shape[0]):
+            try:
+                left_list.append(self.hand_connections[self.adj_mat_to_key(graphs_np[k, 0, :])])
+            except KeyError:
+                left_list.append(undefined_dict)
+                
+        right_list = []
+        for k in range(graphs_np.shape[0]):
+            try:
+                right_list.append(self.hand_connections[self.adj_mat_to_key(graphs_np[k, 1, :])])
+            except:
+                right_list.append(undefined_dict)
+        
+        contact_dict = copy.deepcopy(undefined_dict)
+        contact_dict['colour'] = 'b'
+        contact_dict['label'] = "In contact"
+        
+        free_dict = copy.deepcopy(undefined_dict)
+        free_dict['colour'] = 'r'
+        free_dict['label'] = "Free space"
+        
+        left_free_space = []
+        right_free_space = []
+        for k in range(free_space_np.shape[0]):
+            if free_space_np[k, 0] > 0.5:
+                left_free_space.append(contact_dict)
+            else:
+                left_free_space.append(free_dict)
+                
+            if free_space_np[k, 1] > 0.5:
+                right_free_space.append(contact_dict)
+            else:
+                right_free_space.append(free_dict)
+                
+
+        colour_list = [beam_list, left_list, right_list, left_free_space, right_free_space]
+        
+        fig, axes = plt.subplots(1, len(colour_list), figsize=(15, 4))
+        fig.suptitle(title)
+        for axis_counter, axis in enumerate(axes):
+            axis.axis('equal')
+            for k in range(x_np.shape[0]):
+                if not colour_list[axis_counter][k]["plotted"]:
+                    axis.scatter(x_np[k], y_np[k], color=colour_list[axis_counter][k]["colour"], label=colour_list[axis_counter][k]["label"])
+                    colour_list[axis_counter][k]["plotted"] = True
+                else:
+                    axis.scatter(x_np[k], y_np[k], color=colour_list[axis_counter][k]["colour"])
+            axis.legend()
+        
+        for c_list in colour_list:
+            self.reset_colour_dict(c_list)
+        
+        return fig, axes
+
+    def plot_figures(self, x_np, y_np, colour_list, title=''):
+        fig, axes = plt.subplots(1, len(colour_list), figsize=(15, 4))
+        fig.suptitle(title)
+        for axis_counter, axis in enumerate(axes):
+            axis.axis('equal')
+            for k in range(x_np.shape[0]):
+                if not colour_list[axis_counter][k]["plotted"]:
+                    axis.scatter(x_np[k], y_np[k], color=colour_list[axis_counter][k]["colour"], label=colour_list[axis_counter][k]["label"])
+                    colour_list[axis_counter][k]["plotted"] = True
+                else:
+                    axis.scatter(x_np[k], y_np[k], color=colour_list[axis_counter][k]["colour"])
+            axis.legend()
+        
+        for c_list in colour_list:
+            self.reset_colour_dict(c_list)
+        return fig, axes
+        

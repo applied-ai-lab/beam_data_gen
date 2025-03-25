@@ -93,10 +93,10 @@ def main():
 
             # Classify the graphs   
             graphs_for_plotting = torch.sigmoid(model._classifier.graph_forward(
-                                        latents_for_plotting.z[:, 0:vae_params.robot_latent_dim])).round()
+                                        latents_for_plotting.z)).round()
             
             free_space = torch.sigmoid(model._classifier.space_forward(
-                                        latents_for_plotting.z[:, vae_params.robot_latent_dim:])).round()
+                                        latents_for_plotting.z)).round()
             # Plot stuff
             title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
             fig, axes = latent_inspector.plot_freespace_latents(x, y, graphs_for_plotting[:, :, :], free_space, title)

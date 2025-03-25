@@ -46,7 +46,7 @@ class SpaceClassifier(Classifier):
         self._loss_crit = nn.BCEWithLogitsLoss(reduction="sum")
         
     def graph_forward(self, inputs: torch.tensor):
-        logits = self.graph_mlp(inputs)
+        logits = self.graph_mlp(inputs[:, 0:self.vae_params.robot_latent_dim])
         # Reshape to batch_size, no_nodes, no_nodes
         logits_reshaped = logits.reshape(inputs.shape[0], 
                                          self.vae_params.no_classifier_nodes, 
@@ -56,14 +56,14 @@ class SpaceClassifier(Classifier):
         return edge_pred
     
     def space_forward(self, inputs: torch.tensor):
-        logits = self.space_mlp(inputs)
+        logits = self.space_mlp(inputs[:, self.vae_params.robot_latent_dim: 
+                            self.vae_params.robot_latent_dim + self.vae_params.beam_latent_dim])
         return logits
     
     def forward(self, inputs: torch.tensor):
         # Forward through models
-        graph_pred = self.graph_forward(inputs[:, 0:self.vae_params.robot_latent_dim])
-        space_pred = self.space_mlp(inputs[:, self.vae_params.robot_latent_dim: 
-                                                self.vae_params.robot_latent_dim + self.vae_params.beam_latent_dim])
+        graph_pred = self.graph_forward(inputs)
+        space_pred = self.space_mlp(inputs)
         
         non_diag_values = self.get_offdiagonals(graph_pred)
         

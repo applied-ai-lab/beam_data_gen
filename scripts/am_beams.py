@@ -22,10 +22,12 @@ from vae_planner.activation_maximisation.act_max import (ActMaxParams, ActMaxOut
 
 from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot)
 from beam_data_gen.models.datasets.beam_dataset import BeamDataset, ProcessData
+from beam_data_gen.models.datasets.space_dataset import SpaceDataset
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.encoders.beam_robot_encoder import BeamRobotEncoder
 from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
+from beam_data_gen.models.classifiers.space_classifier import SpaceClassifier
 from beam_data_gen.models.containers.beam_robot_containers import BeamRobotLatents
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
@@ -52,9 +54,9 @@ def main():
 
     model = BeamVae(vae_params, 
                 train_params,
-                BeamRobotEncoder,
-                BeamRobotDecoder,
-                BeamGraphClassifier).to(vae_params.device)
+                EncoderBase,
+                BeamDecoder,
+                SpaceClassifier).to(vae_params.device)
     
     model.load_state_dict(torch.load(vae_params.in_path))
     print(vae_params.in_path)
@@ -68,7 +70,7 @@ def main():
     poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
     
     no_inputs = 1000
-    dataset = BeamDataset(poses, flat_adj, vae_params.device)
+    dataset = SpaceDataset(poses, flat_adj, vae_params.device)
     loader = DataLoader(dataset, batch_size=no_inputs, shuffle=True)
     
     x_in, x_out, adj_mat = next(iter(loader))
@@ -84,8 +86,7 @@ def main():
     no_samps = 300
     x, y = latent_inspector.sample_latent_values_from_unit_circle_2d(radius=2.5, no_samps=no_samps)
     
-    latents_for_plotting = BeamRobotLatents(vae_params.robot_latent_dim,
-                                            vae_params.beam_latent_dim)
+    latents_for_plotting = LatentVarsBase()
     latents_for_plotting.z = torch.zeros([no_samps, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device)
     
     print(latent_dims)
@@ -95,8 +96,7 @@ def main():
     act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-1, 100, 0.2)
     act_max = BeamActMax(act_max_params, vae_params.device)    
     
-    latents = BeamRobotLatents(vae_params.robot_latent_dim,
-                                vae_params.beam_latent_dim)
+    latents = LatentVarsBase()
     
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
     d = mujoco.MjData(m)
@@ -108,7 +108,7 @@ def main():
     grad_list = []
     
     out_pred = model.decoder(latents, None)
-    out_graph = model.classifier(latents.z)
+    out_graph = model._classifier.graph_forward(latents.z)
             
     denorm_out = data_processor.denorm_output(out_pred.x_pred)
     
@@ -146,7 +146,7 @@ def main():
     
     while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
         latents.z = l_z
-        graph_hat = model._classifier.forward(latents.z)
+        graph_hat = model._classifier.graph_forward(latents.z)
         loss = act_max_params.loss_func(graph_hat, graph_target)
         optimizer.zero_grad()                
         loss.backward(retain_graph=True)
@@ -171,7 +171,7 @@ def main():
     
     while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
         latents.z = l_z
-        graph_hat = model._classifier.forward(latents.z)
+        graph_hat = model._classifier.graph_forward(latents.z)
         loss = act_max_params.loss_func(graph_hat, graph_target)
         optimizer.zero_grad()                
         loss.backward(retain_graph=True)
@@ -197,7 +197,7 @@ def main():
     
     while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
         latents.z = l_z
-        graph_hat = model._classifier.forward(latents.z)
+        graph_hat = model._classifier.graph_forward(latents.z)
         loss = act_max_params.loss_func(graph_hat, graph_target)
         optimizer.zero_grad()                
         loss.backward(retain_graph=True)
@@ -212,11 +212,11 @@ def main():
     
     latents_torch = torch.cat(latent_torch_list,dim=0)
     
-    latents = BeamRobotLatents(vae_params.robot_latent_dim, vae_params.beam_latent_dim)
+    latents = LatentVarsBase()
     latents.z = latents_torch
     
     x_out = model.decoder(latents, None)
-    out_graph = model._classifier.forward(latents.z)
+    out_graph = model._classifier.graph_forward(latents.z)
     
     # Optimise z traj again for primal
     # out  = act_max.optimise_primal(model, latents, out_graph.detach().clone())
@@ -224,7 +224,7 @@ def main():
     # latents.z = out.z
     
     x_out = model.decoder(latents, None)
-    out_graph = model._classifier.forward(latents.z)    
+    out_graph = model._classifier.graph_forward(latents.z)    
         
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
@@ -263,7 +263,7 @@ def main():
             latents_for_plotting.z[:, j] = y
 
             # Classify the graphs      
-            graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
+            graphs_for_plotting = torch.sigmoid(model._classifier.graph_forward(latents_for_plotting.z)).round()
             title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
             fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
             

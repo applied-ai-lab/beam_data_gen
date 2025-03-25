@@ -16,6 +16,7 @@ from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.vaes.beam_vae_pp import BeamVae
 from beam_data_gen.models.classifiers.linear_classifier import LinearClassifier
+from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
 from beam_data_gen.models.vaes.beam_robot_vae import (BeamVaeParams,
                                                 BeamRobotVae, BeamRobotEncoder, BeamRobotLatents,
                                                 BeamRobotInputs, BeamRobotOutputs,
@@ -114,8 +115,8 @@ def main():
 
     model = BeamVae(vae_params, 
                         train_params,
-                        EncoderBase,
-                        BeamDecoder,
+                        BeamRobotEncoder,
+                        BeamRobotDecoder,
                         BeamGraphClassifier).to(vae_params.device)
     
     if train_params.read_from_file:

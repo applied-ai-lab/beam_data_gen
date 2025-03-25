@@ -26,6 +26,7 @@ from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.encoders.beam_robot_encoder import BeamRobotEncoder
 from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
+from beam_data_gen.models.containers.beam_robot_containers import BeamRobotLatents
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
@@ -51,8 +52,8 @@ def main():
 
     model = BeamVae(vae_params, 
                 train_params,
-                EncoderBase,
-                BeamDecoder,
+                BeamRobotEncoder,
+                BeamRobotDecoder,
                 BeamGraphClassifier).to(vae_params.device)
     
     model.load_state_dict(torch.load(vae_params.in_path))
@@ -83,7 +84,8 @@ def main():
     no_samps = 300
     x, y = latent_inspector.sample_latent_values_from_unit_circle_2d(radius=2.5, no_samps=no_samps)
     
-    latents_for_plotting = LatentVarsBase()
+    latents_for_plotting = BeamRobotLatents(vae_params.robot_latent_dim,
+                                            vae_params.beam_latent_dim)
     latents_for_plotting.z = torch.zeros([no_samps, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device)
     
     print(latent_dims)
@@ -93,7 +95,8 @@ def main():
     act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-1, 100, 0.2)
     act_max = BeamActMax(act_max_params, vae_params.device)    
     
-    latents = LatentVarsBase()
+    latents = BeamRobotLatents(vae_params.robot_latent_dim,
+                                vae_params.beam_latent_dim)
     
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
     d = mujoco.MjData(m)
@@ -131,16 +134,18 @@ def main():
     mse_loss =nn.MSELoss(reduction='sum')
         
     latent_torch_list = []
-    latents.z = latents.z.clone().detach().requires_grad_(True)
+    l_z = latents.z.clone().detach().requires_grad_(True)
+    latents.z = l_z
     latent_list.append(latents.z.detach().cpu().numpy().squeeze())
-    latent_torch_list.append(latents.z.clone())    
+    latent_torch_list.append(latents.z.clone())   
     
     # Create optimiser
-    optimizer = optim.SGD([latents.z], lr=act_max_params.lr)
+    optimizer = optim.SGD([l_z], lr=act_max_params.lr)
     
     counter = 0
     
     while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
+        latents.z = l_z
         graph_hat = model._classifier.forward(latents.z)
         loss = act_max_params.loss_func(graph_hat, graph_target)
         optimizer.zero_grad()                
@@ -165,6 +170,7 @@ def main():
     counter = 0
     
     while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
+        latents.z = l_z
         graph_hat = model._classifier.forward(latents.z)
         loss = act_max_params.loss_func(graph_hat, graph_target)
         optimizer.zero_grad()                
@@ -190,6 +196,7 @@ def main():
     counter = 0
     
     while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
+        latents.z = l_z
         graph_hat = model._classifier.forward(latents.z)
         loss = act_max_params.loss_func(graph_hat, graph_target)
         optimizer.zero_grad()                
@@ -205,16 +212,16 @@ def main():
     
     latents_torch = torch.cat(latent_torch_list,dim=0)
     
-    latents = LatentVarsBase()
+    latents = BeamRobotLatents(vae_params.robot_latent_dim, vae_params.beam_latent_dim)
     latents.z = latents_torch
     
     x_out = model.decoder(latents, None)
     out_graph = model._classifier.forward(latents.z)
     
     # Optimise z traj again for primal
-    out  = act_max.optimise_primal(model, latents, out_graph.detach().clone())
+    # out  = act_max.optimise_primal(model, latents, out_graph.detach().clone())
     
-    latents.z = out.z
+    # latents.z = out.z
     
     x_out = model.decoder(latents, None)
     out_graph = model._classifier.forward(latents.z)    
@@ -250,8 +257,8 @@ def main():
 
             print(np.std(latent_traj, 0))
             
-            i, j = latent_dims[0], latent_dims[1]
-            # i, j = 3, 4
+            # i, j = latent_dims[0], latent_dims[1]
+            i, j = 5, 0
             latents_for_plotting.z[:, i] = x
             latents_for_plotting.z[:, j] = y
 
@@ -269,7 +276,7 @@ def main():
                 
             plt.figure()
             plt.plot(loss_traj, label="total")
-            plt.plot(out.loss.detach().cpu().numpy())
+            # plt.plot(out.loss.detach().cpu().numpy())
             plt.legend()
             
             plt.figure()

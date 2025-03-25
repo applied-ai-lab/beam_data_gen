@@ -23,6 +23,7 @@ from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.encoders.beam_robot_encoder import BeamRobotEncoder
 from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
+from beam_data_gen.models.classifiers.space_classifier import SpaceClassifier
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
@@ -44,9 +45,9 @@ def main():
 
     model = BeamVae(vae_params, 
                 train_params,
-                BeamRobotEncoder,
-                BeamRobotDecoder,
-                BeamGraphClassifier).to(vae_params.device)
+                EncoderBase,
+                BeamDecoder,
+                SpaceClassifier).to(vae_params.device)
     
     model.load_state_dict(torch.load(vae_params.in_path))
     print(vae_params.in_path)
@@ -86,13 +87,19 @@ def main():
     for i in range(latent_dims.shape[0]):
         j = copy.deepcopy(i)
         while j < latent_dims.shape[0]:
+            latents_for_plotting.z *= 0.0
             latents_for_plotting.z[:, latent_dims[i]] = x
             latents_for_plotting.z[:, latent_dims[j]] = y
 
-            # Classify the graphs      
-            graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
+            # Classify the graphs   
+            graphs_for_plotting = torch.sigmoid(model._classifier.graph_forward(
+                                        latents_for_plotting.z[:, 0:vae_params.robot_latent_dim])).round()
+            
+            free_space = torch.sigmoid(model._classifier.space_forward(
+                                        latents_for_plotting.z[:, vae_params.robot_latent_dim:])).round()
+            # Plot stuff
             title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
-            fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
+            fig, axes = latent_inspector.plot_freespace_latents(x, y, graphs_for_plotting[:, :, :], free_space, title)
             
             file_path = os.path.join('figures', 'latent_space', f'VAE_11_latent_{i}_{j}')
             print(file_path)

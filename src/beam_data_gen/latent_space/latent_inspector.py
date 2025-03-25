@@ -74,6 +74,20 @@ class BeamLSInspector(LatentInspector):
             latent_dims = np.argsort(mean_var)
             return latent_dims, mean_var[latent_dims]
         
+    def split_latent_dims(self, latent_dims):
+        if not self.vae_params.split_encoder:
+            return latent_dims
+        else:
+            latents_robot = []
+            latents_beams = []
+            
+            for k in range(latent_dims.shape[0]):
+                if latent_dims[k] < self.vae_params.robot_latent_dim:
+                    latents_robot.append(latent_dims[k])
+                else:
+                    latents_beams.append(latent_dims[k])
+            return (latents_robot, latents_beams)                
+        
     def plot_latents(self, x: torch.tensor, y: torch.tensor, batched_graphs: torch.tensor, title: str=None):
         # Convert values to numpy arrays
         x_np = x.detach().cpu().numpy()

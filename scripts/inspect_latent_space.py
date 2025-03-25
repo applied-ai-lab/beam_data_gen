@@ -88,8 +88,8 @@ def main():
         j = copy.deepcopy(i)
         while j < latent_dims.shape[0]:
             latents_for_plotting.z *= 0.0
-            latents_for_plotting.z[:, latent_dims[i]] = x
-            latents_for_plotting.z[:, latent_dims[j]] = y
+            latents_for_plotting.z[:, i] = x
+            latents_for_plotting.z[:, j] = y
 
             # Classify the graphs   
             graphs_for_plotting = torch.sigmoid(model._classifier.graph_forward(

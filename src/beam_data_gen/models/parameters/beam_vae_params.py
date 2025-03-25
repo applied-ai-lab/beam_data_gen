@@ -95,7 +95,7 @@ class BeamVaeParams(VaeParams):
     
     @property
     def output_dim(self) -> int:
-        return self.robot_output_dim + self.beam_ouput_dim
+        return self.robot_output_dim + self.beam_output_dim
                 
     @property
     def beam_input_dim(self) -> int:
@@ -114,7 +114,7 @@ class BeamVaeParams(VaeParams):
         return self.state_dim * self.no_outputs * self.no_hands
     
     @property
-    def beam_ouput_dim(self) -> int:
+    def beam_output_dim(self) -> int:
         return self.state_dim * self.no_outputs * self.no_beams
 
     @property

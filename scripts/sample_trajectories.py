@@ -79,19 +79,18 @@ def main():
     
     no_random_inits = 500
     
-    datasaver_dict = {}
-    
     with mujoco.viewer.launch_passive(m, d) as viewer:
         for name, graph in graphs.items():    
             
-            hand_idx = 0        
+            # Create the datasaver
+            datasaver = DataSaver(graph)
             
             for left_connection in left_connections:
                 # Add hand connections
                 graph.add_hand("robot_left_hand", left_connection)
                 
                 for right_connection in right_connections:
-                                
+                    
                     # Add hand connections
                     graph.add_hand("robot_right_hand", right_connection)
                     
@@ -101,9 +100,6 @@ def main():
                         # Find trajectories
                         sampler.move_hands(graph, params)
                         traj_counter = 0
-                        
-                        # Create the datasaver
-                        datasaver = DataSaver(graph)
                                         
                         # Start loop and sample pose
                         while viewer.is_running() and traj_counter < params.no_samples:
@@ -124,22 +120,19 @@ def main():
                             pose_dict = sampler.graph_to_pose_dict(graph)
                             set_q(d.qpos, pose_dict)  
                             
-                            # Data saver append graph
-                            datasaver.append_graph(graph)
+                            # Save data
+                            if not check_graph_collisions(d, graph):
+                                datasaver.append_graph(graph)
                             
                             traj_counter += 1
                             
                             # time.sleep(dt)
-                            
-                        datasaver_dict[hand_idx] = [copy.deepcopy(datasaver.df)]
-                        hand_idx += 1
-            
-            data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
+
             # Save data
-            path_dir = os.path.join("data/trajectories_big_3")
+            path_dir = os.path.join("data/robot_graphs_trajectories_small")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
-            data_df.to_pickle(os.path.join(path_dir, name + ".pkl"))           
+            datasaver.df.to_pickle(os.path.join(path_dir, name + ".pkl"))                   
 
     return 0
 

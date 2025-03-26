@@ -8,13 +8,14 @@ import torch
 from torch.utils.data import Dataset
 from scipy.spatial.transform import Rotation as R
 
-from beam_data_gen.models.datasets.process_data import ProcessData
+from beam_data_gen.models.datasets.process_space_data import ProcessSpaceData
     
     
 class SpaceDataset(Dataset):
     def __init__(self, 
                  poses: np.array, 
                  flat_adj: np.array,
+                 connections: np.array,
                  device: torch.device):
         super().__init__()
         
@@ -22,7 +23,9 @@ class SpaceDataset(Dataset):
         "The number of rows should be the same for poses and flat_adj."
         
         self._data = {'poses': torch.tensor(poses, dtype=torch.float32, device=device),
-                      'flat_adj': torch.tensor(flat_adj, dtype=torch.float32, device=device)}
+                      'flat_adj': torch.tensor(flat_adj, dtype=torch.float32, device=device),
+                      'connect': torch.tensor(connections, dtype=torch.float32, device=device)
+                      }
         
         self._no_nodes = int(np.sqrt(flat_adj.shape[1]))
         
@@ -37,26 +40,25 @@ class SpaceDataset(Dataset):
         x_in = self._data['poses'][index, :]
         x_out = self._data['poses'][index, :]
         
-        # QQQQ To do: put this in the dataset generation code
-        adj_mat = self._data['flat_adj'][index, :].reshape(self._no_nodes, self._no_nodes)
+        # Adjacency matrices
+        adj_mat_offdiags = self.get_offdiagonals(self._data['flat_adj'][index, :].reshape(self._no_nodes, self._no_nodes))
         
-        # Find if the hand is in contact or free space 
-        row_sums = adj_mat.sum(dim=1)
-        result = (row_sums > 0).int()
+        # Connections
+        connections = self._data['connect'][index, :]
                 
-        return x_in, x_out, torch.cat([self.get_offdiagonals(adj_mat), result[0:2]], dim=0)
+        return x_in, x_out, torch.cat([adj_mat_offdiags, connections], dim=0)
             
             
     
 
 if __name__ == "__main__":
-    path = "data/robot_graphs/"
+    path = "data/robot_graphs_trajectories_small/"
     
-    process_data = ProcessData(np.array([0.6, 0.6, 0.08]))
-    poses, adj = process_data(path, ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
+    process_data = ProcessSpaceData(np.array([0.6, 0.6, 0.08]))
+    poses, adj, connect = process_data(path, ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
     
     # Data loader
-    dataset = SpaceDataset(poses, adj, torch.device('cuda'))
+    dataset = SpaceDataset(poses, adj, connect, torch.device('cuda'))
     
     x_in, x_out, adj_mat = dataset.__getitem__(1)
     

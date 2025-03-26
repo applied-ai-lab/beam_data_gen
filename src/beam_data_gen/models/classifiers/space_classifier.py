@@ -61,9 +61,9 @@ class SpaceClassifier(Classifier):
         return logits
     
     def forward(self, inputs: torch.tensor):
-        # Forward through models
+        # Forward through models        
         graph_pred = self.graph_forward(inputs)
-        space_pred = self.space_mlp(inputs)
+        space_pred = self.space_forward(inputs)
         
         non_diag_values = self.get_offdiagonals(graph_pred)
         

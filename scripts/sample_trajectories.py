@@ -77,7 +77,7 @@ def main():
     max_velocities = np.array([0.25, 0.25, 0.05, 0.25, 0.25, 0.25])
     params = PoseSamplerParams(dt, duration, None, max_velocities, np.array([1, 1, 1, 0, 0, 1]))
     
-    no_random_inits = 500
+    no_random_inits = 50
     
     with mujoco.viewer.launch_passive(m, d) as viewer:
         for name, graph in graphs.items():    
@@ -129,7 +129,7 @@ def main():
                             # time.sleep(dt)
 
             # Save data
-            path_dir = os.path.join("data/robot_graphs_trajectories")
+            path_dir = os.path.join("data/robot_graphs_trajectories_small")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
             datasaver.df.to_pickle(os.path.join(path_dir, name + ".pkl"))                   

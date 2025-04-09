@@ -77,7 +77,7 @@ def main():
     max_velocities = np.array([0.25, 0.25, 0.05, 0.25, 0.25, 0.25])
     params = PoseSamplerParams(dt, duration, None, max_velocities, np.array([1, 1, 1, 0, 0, 1]))
     
-    no_random_inits = 50
+    no_random_inits = 500
     
     with mujoco.viewer.launch_passive(m, d) as viewer:
         for name, graph in graphs.items():    

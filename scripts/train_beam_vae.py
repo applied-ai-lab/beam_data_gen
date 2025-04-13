@@ -106,11 +106,11 @@ def main():
     
     ##########################################
     # Process data
-    process_data = ProcessData(np.array(vae_params.pos_lims))
+    process_data = ProcessTrajectories(np.array(vae_params.pos_lims), device=vae_params.device)
     poses, flat_adj = process_data(train_params.data_path, ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
 
     # Create dataset and dataloaders
-    dataset_class = BeamDataset(poses, flat_adj, device=vae_params.device)
+    dataset_class = TrajectoryDataset(poses, flat_adj, vae_params.no_inputs, vae_params.no_outputs)
     ##########################################
     
     # Split training and test

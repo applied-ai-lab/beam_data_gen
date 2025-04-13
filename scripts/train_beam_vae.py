@@ -11,6 +11,8 @@ from torch.utils.tensorboard import SummaryWriter
 from vae_planner.argparse_yaml_loader.yaml_loader import YamlLoader
 from vae_planner.models.encoder_base import EncoderBase
 
+from beam_data_gen.models.datasets.process_data import ProcessData
+from beam_data_gen.models.datasets.beam_dataset import BeamDataset
 from beam_data_gen.models.datasets.process_trajectories import ProcessTrajectories
 from beam_data_gen.models.datasets.trajectory_dataset import TrajectoryDataset
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
@@ -104,11 +106,11 @@ def main():
     
     ##########################################
     # Process data
-    process_data = ProcessTrajectories(np.array(vae_params.pos_lims), device=vae_params.device)
+    process_data = ProcessData(np.array(vae_params.pos_lims))
     poses, flat_adj = process_data(train_params.data_path, ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
 
     # Create dataset and dataloaders
-    dataset_class = TrajectoryDataset(poses, flat_adj, vae_params.no_inputs, vae_params.no_outputs)
+    dataset_class = BeamDataset(poses, flat_adj, device=vae_params.device)
     ##########################################
     
     # Split training and test

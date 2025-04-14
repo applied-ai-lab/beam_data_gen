@@ -77,7 +77,7 @@ def main():
     max_velocities = np.array([0.25, 0.25, 0.05, 0.25, 0.25, 0.25])
     params = PoseSamplerParams(dt, duration, None, max_velocities, np.array([1, 1, 1, 0, 0, 1]))
     
-    no_random_inits = 500
+    no_random_inits = 5
     
     datasaver_dict = {}
     
@@ -136,7 +136,7 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            path_dir = os.path.join("data/trajectories_big_3")
+            path_dir = os.path.join("data/trajectories_small")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
             data_df.to_pickle(os.path.join(path_dir, name + ".pkl"))           

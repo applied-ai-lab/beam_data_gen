@@ -98,7 +98,7 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
     d = mujoco.MjData(m)
     
-    latents.z = -1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_(True)
+    latents.z = 1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_(True)
     latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)

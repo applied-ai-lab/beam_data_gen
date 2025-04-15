@@ -90,7 +90,7 @@ def main():
     
         
     # AM for ls
-    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.2)
+    act_max_params = ActMaxParams(nn.BCEWithLogitsLoss(), 1.0e-2, 100, 0.05)
     act_max = BeamActMax(act_max_params, vae_params.device)    
     
     latents = LatentVarsBase()

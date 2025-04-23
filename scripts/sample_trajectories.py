@@ -8,7 +8,7 @@ import mujoco
 from mujoco import MjModel, MjData
 import mujoco.viewer
 
-from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot, RobotGraph)
+from beam_data_gen.beam_impl.robot_graph import (square_graphs, RobotGraph)
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler, PoseSamplerParams
 from beam_data_gen.data_sampling.data_saver import DataSaver
 
@@ -23,19 +23,26 @@ def pose_to_q(trans, rot):
 
 
 def set_q(q_pos, q_pos_dict):
-    q_pos[0:7] = pose_to_q(q_pos_dict["l_beam_1"].trans, q_pos_dict["l_beam_1"].orient)
-    q_pos[7:14] = pose_to_q(q_pos_dict["l_beam_2"].trans, q_pos_dict["l_beam_2"].orient)
-    q_pos[14:21] = pose_to_q(q_pos_dict["l_pin_A"].trans, q_pos_dict["l_pin_A"].orient)
-    q_pos[21:28] = pose_to_q(q_pos_dict["robot_left_hand"].trans, q_pos_dict["robot_left_hand"].orient)
-    q_pos[28:35] = pose_to_q(q_pos_dict["robot_right_hand"].trans, q_pos_dict["robot_right_hand"].orient)
+    # Ramp components
+    q_pos[0:7] = pose_to_q(q_pos_dict["square_beam_1"].trans, q_pos_dict["square_beam_1"].orient)
+    q_pos[7:14] = pose_to_q(q_pos_dict["square_pin_A"].trans, q_pos_dict["square_pin_A"].orient)
+    q_pos[14:21] = pose_to_q(q_pos_dict["square_beam_2"].trans, q_pos_dict["square_beam_2"].orient)
+    q_pos[21:28] = pose_to_q(q_pos_dict["square_pin_B"].trans, q_pos_dict["square_pin_B"].orient)
+    q_pos[28:35] = pose_to_q(q_pos_dict["square_beam_3"].trans, q_pos_dict["square_beam_3"].orient)
+    q_pos[35:42] = pose_to_q(q_pos_dict["square_pin_C"].trans, q_pos_dict["square_pin_C"].orient)
+    q_pos[42:49] = pose_to_q(q_pos_dict["square_beam_4"].trans, q_pos_dict["square_beam_4"].orient)
+    q_pos[49:56] = pose_to_q(q_pos_dict["square_pin_D"].trans, q_pos_dict["square_pin_D"].orient)
+    # Hands
+    q_pos[56:63] = pose_to_q(q_pos_dict["robot_left_hand"].trans, q_pos_dict["robot_left_hand"].orient)
+    q_pos[63:70] = pose_to_q(q_pos_dict["robot_right_hand"].trans, q_pos_dict["robot_right_hand"].orient)
     return
 
     
 def check_graph_collisions(data, ramp_graph: RobotGraph):
     collision = False
-    geom_to_name = {1: "l_beam_1",
-                    2: "l_beam_2",
-                    3: "l_pin_A"}
+    geom_to_name = {1: "square_beam_1",
+                    2: "square_beam_2",
+                    3: "square_pin_A"}
     for i in range(data.ncon):  # Iterate through contacts
         contact = data.contact[i]
         geom1 = contact.geom1
@@ -52,7 +59,7 @@ def check_graph_collisions(data, ramp_graph: RobotGraph):
 
 def main():
 
-    m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
+    m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
 
     # Initialise the classes
@@ -60,15 +67,18 @@ def main():
     sampler = BeamSampler(trans_lims)
 
     # Beam config graph
-    graphs = {"connected": l_connected_robot, 
-              "pin_removed": l_pin_removed_robot, 
-              "disconnected": l_disconnected_robot}
+    graphs = square_graphs
     
     # Hand connections
     left_connections = [None,
-                        "l_beam_1",
-                        "l_beam_2",
-                        "l_pin_A"]
+                        "square_beam_1",
+                        "square_pin_A",
+                        "square_beam_2",
+                        "square_pin_B",
+                        "square_beam_3",
+                        "square_pin_C",
+                        "square_beam_4",
+                        "square_pin_D"]
     right_connections = copy.deepcopy(left_connections)
     
     # Set up parameters
@@ -136,10 +146,10 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            path_dir = os.path.join("data/trajectories_small")
+            path_dir = os.path.join("data/trajectories_square_small")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
-            data_df.to_pickle(os.path.join(path_dir, name + ".pkl"))           
+            data_df.to_pickle(os.path.join(path_dir, str(name) + ".pkl"))           
 
     return 0
 

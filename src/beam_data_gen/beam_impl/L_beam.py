@@ -31,16 +31,15 @@ class L_BeamParams(LGraph):
         return self._node_dict
     
 # Implementations
+beam_params = L_BeamParams()
 
 # Fully connected
-l_connected_graph = RampGraph()
-beam_params = L_BeamParams()
-l_connected_graph.create_graph(beam_params.A, beam_params.node_dict)
+l_connected_graph = RampGraph(beam_params.A, beam_params.node_dict)
 
 # Fully disconnected
 l_disconnected = copy.deepcopy(l_connected_graph)
 
 # Pin removed
 action_lst = l_disconnected.disassemble()
-l_pin_removed = RampGraph()
+l_pin_removed = copy.deepcopy(l_connected_graph)
 l_pin_removed.graph = action_lst[0].graph

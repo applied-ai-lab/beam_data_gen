@@ -2,7 +2,6 @@ import copy
 from typing import Dict
 
 import numpy as np
-from itertools import combinations
 import networkx as nx
 
 from assembly_tools.graph_primitives.graph_primitives import BeamBase
@@ -79,39 +78,6 @@ class RobotGraph(RampGraph):
         for child_node in child_nodes:
             self.graph.remove_edge(node, child_node)
         return        
-    
-    def find_subgraphs(self, graph: RampGraph, no_runs: int):
-        no_nodes = len(graph.node_lst)
-        
-        counter = 0
-        graph_dict = {counter: graph.A.astype(int).copy()}
-        counter += 1 
-        for i in range(no_runs):
-            graph_c = copy.deepcopy(graph)
-            for j in range(no_nodes):
-                action_lst = graph_c.disassemble(shuffle=True, remove_node=False)
-                if action_lst is not None:
-                    for action in action_lst:
-                        adj_matrix = nx.to_numpy_array(action.graph).astype(int).copy()
-                        
-                        append_to_dict = True
-                        for mat in graph_dict.values():
-                            
-                            if (mat == adj_matrix).all():
-                                append_to_dict = False
-                        if append_to_dict:
-                            graph_dict[counter] = adj_matrix
-                            counter += 1
-        
-        # Check that there are no duplicates
-        assert not self.has_duplicate_arrays(graph_dict.values()), " Graph creation failed -- adj mat has duplicates. "
-        return self.adj_dict_to_robot_graph(graph_dict)
-                
-    def has_duplicate_arrays(self, values: list):
-        return any(np.array_equal(a, b) for a, b in combinations(values, 2))    
-    
-    def adj_dict_to_robot_graph(self, graph_dict: Dict[str, np.array]):
-        return {key: RobotGraph(A, self._node_type_dict) for key, A in graph_dict.items()}
 
     
 ## Implementations

@@ -107,16 +107,7 @@ def main():
     ##########################################
     # Process data
     process_data = ProcessTrajectories(np.array(vae_params.pos_lims), device=vae_params.device)
-    poses, flat_adj = process_data(train_params.data_path, ["robot_left_hand", 
-                                                            "robot_right_hand", 
-                                                            "square_beam_1",
-                                                            "square_pin_A",
-                                                            "square_beam_2",
-                                                            "square_pin_B",
-                                                            "square_beam_3",
-                                                            "square_pin_C",
-                                                            "square_beam_4",
-                                                            "square_pin_D"])
+    poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
 
     # Create dataset and dataloaders
     dataset_class = TrajectoryDataset(poses, flat_adj, vae_params.no_inputs, vae_params.no_outputs)

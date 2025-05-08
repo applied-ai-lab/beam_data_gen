@@ -99,7 +99,7 @@ def main():
                 title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
                 fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
                 
-                file_dir = os.path.join('figures', 'latent_space', f'latent_{sub_latent}')
+                file_dir = os.path.join('figures', 'latent_space') #, f'latent_{sub_latent}')
                 
                 if not os.path.exists(file_dir):
                     os.mkdir(file_dir)

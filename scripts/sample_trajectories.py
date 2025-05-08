@@ -83,11 +83,11 @@ def main():
     
     # Set up parameters
     dt = 0.2
-    duration = 10.0
+    duration = 5.0
     max_velocities = np.array([0.25, 0.25, 0.05, 0.25, 0.25, 0.25])
     params = PoseSamplerParams(dt, duration, None, max_velocities, np.array([1, 1, 1, 0, 0, 1]))
     
-    no_random_inits = 5
+    no_random_inits = 1
     
     datasaver_dict = {}
     
@@ -146,7 +146,7 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            path_dir = os.path.join("data/trajectories_square_small")
+            path_dir = os.path.join("data/trajectories_square_test")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
             data_df.to_pickle(os.path.join(path_dir, str(name) + ".pkl"))           

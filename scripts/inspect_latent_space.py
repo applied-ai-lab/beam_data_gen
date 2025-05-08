@@ -88,6 +88,9 @@ def main():
         for i in range(len(small_latents)):
             j = copy.deepcopy(i)
             while j < len(small_latents):
+                # Set all the latents to zero prior to plotting
+                latents_for_plotting.z *= 0.0
+                
                 latents_for_plotting.z[:, small_latents[i]] = x
                 latents_for_plotting.z[:, small_latents[j]] = y
 

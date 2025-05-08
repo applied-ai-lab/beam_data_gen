@@ -10,8 +10,9 @@ from scipy.spatial.transform import Rotation as R
 
 
 class ProcessData:
-    def __init__(self, pos_lims: np.array):
+    def __init__(self, pos_lims: np.array, state_dim: int = 5):
         self._pos_lims = pos_lims
+        self._state_dim = state_dim
         
     def load_data(self, dir_path: str) -> List[pd.DataFrame]:
         pd_files = []        
@@ -29,7 +30,7 @@ class ProcessData:
         return np.hstack([pos, np.sin(theta_z).reshape(-1, 1), np.cos(theta_z).reshape(-1, 1)])
     
     def denorm_output(self, x_pred: torch.tensor):
-        state_dim = 5
+        state_dim = self._state_dim
         
         pos_lim = torch.tensor(self._pos_lims, dtype=x_pred.dtype, device=x_pred.device)
         
@@ -73,3 +74,7 @@ class ProcessData:
     
     def __call__(self, dir_path, beam_names):
         return self.extract_data(dir_path, beam_names)
+    
+    @property
+    def state_dim(self):
+        return self._state_dim

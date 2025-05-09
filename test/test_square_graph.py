@@ -63,7 +63,7 @@ def main():
     
     full_graph = copy.deepcopy(square_robot)
     
-    graph_dict = full_graph.find_subgraphs(full_graph, 100)    
+    graph_dict = full_graph.find_intermediate_graphs(full_graph, 100)    
     
     import pdb
     pdb.set_trace()    

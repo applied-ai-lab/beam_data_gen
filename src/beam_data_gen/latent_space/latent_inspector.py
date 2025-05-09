@@ -314,7 +314,7 @@ class BeamLSInspector(LatentInspector):
     
     def _create_graph_colours(self, ramp_graph: RampGraph, no_runs: int):
         # Find all the graphs
-        graph_dict = ramp_graph.find_subgraphs(ramp_graph, no_runs)
+        graph_dict = ramp_graph.find_intermediate_graphs(ramp_graph, no_runs)
         
         graph_keys = list(self.graph_to_key(graph) for graph in graph_dict.values())
         colour_values = self.generate_colours(len(graph_keys))

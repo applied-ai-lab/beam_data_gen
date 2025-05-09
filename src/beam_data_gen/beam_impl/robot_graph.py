@@ -80,7 +80,7 @@ class RobotGraph(RampGraph):
             self.graph.remove_edge(node, child_node)
         return        
     
-    def find_subgraphs(self, graph: 'RampGraph', no_runs: int) -> Dict[int, 'RampGraph']:
+    def find_intermediate_graphs(self, graph: 'RampGraph', no_runs: int) -> Dict[int, 'RampGraph']:
         no_nodes = len(graph.node_lst)
         
         counter = 0
@@ -152,4 +152,4 @@ square_robot.append_graph(copy.deepcopy(square_connected_graph))
 
 
 # Get all the square graphs
-square_graphs = square_robot.find_subgraphs(copy.deepcopy(square_robot), 100)
+square_graphs = square_robot.find_intermediate_graphs(copy.deepcopy(square_robot), 100)

@@ -7,6 +7,7 @@ import numpy as np
 import mujoco
 from mujoco import MjModel, MjData
 import mujoco.viewer
+import networkx as nx
 
 from beam_data_gen.beam_impl.robot_graph import (square_graphs, RobotGraph)
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler, PoseSamplerParams
@@ -39,10 +40,29 @@ def set_q(q_pos, q_pos_dict):
 
     
 def check_graph_collisions(data, ramp_graph: RobotGraph):
+    
+    # Step 1: Compute connected components
+    components = list(nx.connected_components(ramp_graph.graph))
+
+    # Step 2: Create a mapping from node to component ID
+    node_to_component = {}
+    for idx, comp in enumerate(components):
+        for node in comp:
+            node_to_component[node] = idx
+
+    # Step 3: Function to check if two nodes are in the same component
+    def same_component(node1, node2):
+        return node_to_component.get(node1) == node_to_component.get(node2)
+    
     collision = False
     geom_to_name = {1: "square_beam_1",
-                    2: "square_beam_2",
-                    3: "square_pin_A"}
+                    2: "square_pin_A",
+                    3: "square_beam_2",
+                    4: "square_pin_B",
+                    5: "square_beam_3",
+                    6: "square_pin_C",
+                    7: "square_beam_4",
+                    8: "square_pin_D"}
     for i in range(data.ncon):  # Iterate through contacts
         contact = data.contact[i]
         geom1 = contact.geom1
@@ -51,10 +71,10 @@ def check_graph_collisions(data, ramp_graph: RobotGraph):
         if geom1 not in geom_to_name.keys() or geom2 not in geom_to_name.keys():
             continue
         # If there is a contact between two items which are not connected return true
-        elif not ramp_graph.graph.has_edge(geom_to_name[geom1], geom_to_name[geom2]):
-            return True
-    return collision
-          
+        elif not same_component(geom_to_name[geom1], geom_to_name[geom2]):
+            return True, [geom_to_name[geom1], geom_to_name[geom2]]
+    return collision, []
+
 
 
 def main():
@@ -63,7 +83,7 @@ def main():
     d = mujoco.MjData(m)
 
     # Initialise the classes
-    trans_lims = [0.0, 0.0, 0.0]
+    trans_lims = [0.30, 0.30, 0.0]
     sampler = BeamSampler(trans_lims)
 
     # Beam config graph
@@ -83,11 +103,11 @@ def main():
     
     # Set up parameters
     dt = 0.2
-    duration = 5.0
+    duration = 10.0
     max_velocities = np.array([0.25, 0.25, 0.05, 0.25, 0.25, 0.25])
     params = PoseSamplerParams(dt, duration, None, max_velocities, np.array([1, 1, 1, 0, 0, 1]))
     
-    no_random_inits = 1
+    no_random_inits = 5
     
     datasaver_dict = {}
     
@@ -112,11 +132,13 @@ def main():
                         sampler.move_hands(graph, params)
                         traj_counter = 0
                         
+                        counter = 0
+                        
                         # Create the datasaver
                         datasaver = DataSaver(graph)
                                         
                         # Start loop and sample pose
-                        while viewer.is_running() and traj_counter < params.no_samples:
+                        while viewer.is_running() and counter < params.no_samples:
                             
                             # mj_step can be replaced with code that also evaluates
                             # a policy and applies a control signal before stepping the physics.
@@ -125,8 +147,9 @@ def main():
                             # Pick up changes to the physics state, apply perturbations, update options from GUI.
                             viewer.sync()
                             
-                            # Save data
-                            # if not check_graph_collisions(d, graph):
+                            if traj_counter >= params.no_samples:
+                                sampler.move_hands(graph, params)
+                                traj_counter = 0
                             
                             # Sample a trajectory given the pose
                             sampler.set_pose_with_traj(graph, traj_counter)
@@ -134,9 +157,17 @@ def main():
                             pose_dict = sampler.graph_to_pose_dict(graph)
                             set_q(d.qpos, pose_dict)  
                             
-                            # Data saver append graph
-                            datasaver.append_graph(graph)
+                            # Save data if nto in collision
+                            collision, nodes = check_graph_collisions(d, graph)
+                            if not collision:
+                                # Data saver append graph
+                                datasaver.append_graph(graph)
+                                counter += 1
                             
+                            else:                
+                                print(f"In collision, nodes: {nodes[0]} and {nodes[1]}")
+                                print(left_connection, right_connection, name)
+                                    
                             traj_counter += 1
                             
                             # time.sleep(dt)
@@ -146,7 +177,7 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            path_dir = os.path.join("data/trajectories_square_test")
+            path_dir = os.path.join("data/trajectories_square_small_1")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
             data_df.to_pickle(os.path.join(path_dir, str(name) + ".pkl"))           

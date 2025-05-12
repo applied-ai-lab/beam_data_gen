@@ -28,17 +28,20 @@ class BeamSampler:
         # Get the graph
         G = ramp_graph.graph
         # Find the subgraphs
-        sub_graphs = [G.subgraph(c) for c in nx.connected_components(G)]
+        # components = [G.subgraph(c) for c in nx.connected_components(G)]
+        components = nx.connected_components(G)
         # Iterate through 
-        for sub_graphs in sub_graphs:
-            node_lst = list(sub_graphs.nodes(data=True))
+        # for sub_graphs in components:
+        for node_lst in components:
+            # node_lst = list(sub_graphs.nodes(data=True))
             trans, rot = samp_func()
-            for (node, data) in node_lst:
+            for node in node_lst:
+                data = G.nodes[node]               
                 # Sample a transform
                 # data["pose"].trans += trans + np.matmul(np.matmul(rot.as_matrix(), data["_l_p"].orient.as_matrix()), data["_l_p"].trans)
                 data["pose"].orient = R.from_matrix(np.matmul(rot.as_matrix(), data["_l_p"].orient.as_matrix()))
                 data["pose"].trans = trans + np.matmul(data["pose"].orient.as_matrix(), 
-                                                       np.matmul(data["_l_p"].orient.as_matrix(), data["_l_p"].trans))
+                                                        np.matmul(data["_l_p"].orient.as_matrix(), data["_l_p"].trans))
             # Check the graph is feasible
         return ramp_graph.check_graph()
     
@@ -131,6 +134,7 @@ class BeamSampler:
         return ramp_graph.check_graph()        
     
     def graph_to_pose_dict(self, ramp_graph: RampGraph):
+        self._node_pose_dict = {}
         nodes_data = ramp_graph.node_lst
         for (node, data) in nodes_data:
             self._node_pose_dict[node] = data["pose"]

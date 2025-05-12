@@ -208,6 +208,34 @@ def main():
         latent_torch_list.append(latents.z.clone())
         
         counter += 1
+        
+    # # Set new graph target
+    # Graph Target
+    A = graph.A
+    A[2, 3] = 1
+    A[3, 2] = 1
+    graph.A = A
+    graph_target = torch.tensor([graph.A], dtype=torch.float32).to(vae_params.device)
+    
+    print("Graph Target: \n", graph.A)
+    
+    loss = torch.tensor([1000.0]).to(vae_params.device)    
+    counter = 0
+    
+    while torch.norm(loss) > act_max_params.stop_criterion and counter < act_max_params.max_iters:
+        graph_hat = model._classifier.forward(latents.z)
+        loss = act_max_params.loss_func(graph_hat, graph_target)
+        optimizer.zero_grad()                
+        loss.backward(retain_graph=True)
+        optimizer.step()
+        
+        # Store some values
+        loss_lst.append(loss.detach().cpu().numpy())
+        latent_list.append(latents.z.detach().cpu().numpy().squeeze())
+        latent_torch_list.append(latents.z.clone())
+        
+        counter += 1
+    
     
     latents_torch = torch.cat(latent_torch_list,dim=0)
     

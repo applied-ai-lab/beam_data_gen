@@ -125,7 +125,7 @@ def main():
                         train_params,
                         Encoder,
                         Decoder,
-                        GraphClassifier).to(vae_params.device)
+                        IndependentClassifier).to(vae_params.device)
     
     if train_params.read_from_file:
         model.load_state_dict(torch.load(vae_params.in_path))

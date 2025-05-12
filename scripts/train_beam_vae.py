@@ -20,6 +20,9 @@ from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.vaes.beam_vae_pp import BeamVae
 from beam_data_gen.models.classifiers.linear_classifier import LinearClassifier
 from beam_data_gen.models.classifiers.independent_classifier import IndependentClassifier
+from beam_data_gen.models.encoders.encoder import Encoder
+from beam_data_gen.models.decoders.decoder import Decoder
+from beam_data_gen.models.classifiers.graph_classifier import GraphClassifier
 from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
 from beam_data_gen.models.classifiers.space_classifier import SpaceClassifier
 from beam_data_gen.models.vaes.beam_robot_vae import (BeamVaeParams,
@@ -120,9 +123,9 @@ def main():
 
     model = BeamVae(vae_params, 
                         train_params,
-                        EncoderBase,
-                        BeamDecoder,
-                        BeamGraphClassifier).to(vae_params.device)
+                        Encoder,
+                        Decoder,
+                        GraphClassifier).to(vae_params.device)
     
     if train_params.read_from_file:
         model.load_state_dict(torch.load(vae_params.in_path))

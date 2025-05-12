@@ -4,7 +4,7 @@ from vae_planner.parameter_handlers.vae_params import VaeParams
 from vae_planner.models.decoder_base import DecoderBase
 
 
-class BeamDecoder(DecoderBase):
+class Decoder(DecoderBase):
     def __init__(self,
                  vae_params: VaeParams):
         super().__init__(vae_params)

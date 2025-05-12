@@ -122,7 +122,7 @@ def main():
                         train_params,
                         EncoderBase,
                         BeamDecoder,
-                        IndependentClassifier).to(vae_params.device)
+                        BeamGraphClassifier).to(vae_params.device)
     
     if train_params.read_from_file:
         model.load_state_dict(torch.load(vae_params.in_path))

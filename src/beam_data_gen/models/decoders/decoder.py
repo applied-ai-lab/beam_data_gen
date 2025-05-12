@@ -1,10 +1,11 @@
 from torch import nn
 
+from beam_data_gen.models.decoders.beam_decoder import BeamDecoder 
+
 from vae_planner.parameter_handlers.vae_params import VaeParams
-from vae_planner.models.decoder_base import DecoderBase
 
 
-class Decoder(DecoderBase):
+class Decoder(BeamDecoder):
     def __init__(self,
                  vae_params: VaeParams):
         super().__init__(vae_params)

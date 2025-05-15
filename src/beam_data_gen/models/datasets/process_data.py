@@ -7,6 +7,8 @@ import pandas as pd
 import torch
 from scipy.spatial.transform import Rotation as R
 
+from assembly_tools.types import PoseType
+
 
 
 class ProcessData:
@@ -19,6 +21,12 @@ class ProcessData:
         for root, _, files in os.walk(dir_path):
             pd_files = list(pd.read_pickle(os.path.join(root, file)) for file in files)  
         return pd_files   
+    
+    def extract_pose_from_type(self, data: PoseType):
+        return data.to_pose_quat()
+    
+    def pose_to_rep(self, data: PoseType):
+        return self.extract_pose(self.extract_pose_from_type(data).reshape(-1, 7))
     
     def extract_pose(self, data: np.array):
         pos = data[:, 0:3]

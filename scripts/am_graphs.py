@@ -56,7 +56,7 @@ def main():
     pose_tar_torch = torch.tensor(pose_target, dtype=torch.float32).to(device)
     
     # Find initial condition
-    trans_lims = [0.60, 0.60, 0.0]
+    trans_lims = [1.0, 1.0, 0.0]
     sampler = BeamSampler(trans_lims)
     # Remove all edges and perturb
     graph.A = np.zeros([no_nodes, no_nodes])
@@ -77,9 +77,11 @@ def main():
     pose_lst = []
     loss_lst = []
     
+    mask = 1.0 * torch.ones_like(pose_torch, dtype=torch.float32).to(device)
+    
     for _ in range(no_iters):
         loss =  loss_func(pose_torch, pose_tar_torch)
-        pose_torch = pose_torch - alpha * grad(outputs=loss, inputs=pose_torch, retain_graph=True)[0]
+        pose_torch = pose_torch - alpha * mask * grad(outputs=loss, inputs=pose_torch, retain_graph=True)[0]
         pose_torch = normalise_pose(pose_torch, state_dim=process_data.state_dim)
         loss_lst.append(loss.clone().detach().cpu().numpy())
         
@@ -110,7 +112,7 @@ def main():
         while viewer.is_running():
             for k in range(beam_traj.shape[0]):
                 
-                 # Decoder the prediction
+                # Decoder the prediction
                 sim.decode_x(d, beam_traj[k:k+1, :])
                                 
                 # mj_step can be replaced with code that also evaluates

@@ -34,9 +34,13 @@ def normalise_pose(pose_torch: torch.tensor, state_dim: int):
 def max_gradient(counter, gradient, state_dim):
     # Pin penalty
     pin_indices = list(2 * k * state_dim + i + state_dim for k in range(4) for i in range(state_dim))    
-    gradient[pin_indices] *= 2.0
+    gradient[pin_indices] *= 5.0
     
     gradient_reshaped = gradient.view(-1, state_dim)
+    
+    # Promote the orientation gradients
+    gradient_reshaped[:, 3:] *= 5.0
+    
     grad_norm = torch.norm(gradient_reshaped, p=2.0, dim=1)
     # Item with largest gradient
     max_idx = torch.argmin(grad_norm)
@@ -98,7 +102,7 @@ def main():
     # Define losses
     loss_func = nn.MSELoss(reduction="sum")
     alpha = 1.0e-2
-    no_iters = 4000
+    no_iters = 1500
     
     pose_lst = []
     loss_lst = []

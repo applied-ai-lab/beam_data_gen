@@ -200,7 +200,8 @@ def main():
                                                         pose_torch.view(-1, 5),
                                                         pose_tar_torch.view(-1, 5),
                                                         left_pose,
-                                                        right_pose)
+                                                        right_pose,
+                                                        tol=1e-3)
         left_pose = left_pose - alpha * left_grad
         right_pose = right_pose - alpha * right_grad
         # Calc gradient

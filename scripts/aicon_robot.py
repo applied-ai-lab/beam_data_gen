@@ -116,9 +116,12 @@ def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.
     right_loss[pin_indices] *= 2.0
     
     # Find smallest gradients
+    right_index = torch.argmin(right_loss, 0)
     left_index = torch.argmin(left_loss, 0)
-    right_loss[left_index] = 1.0e3
-    right_index = torch.argmin(right_loss, 0)    
+    
+    if right_index == left_index:
+        right_loss[right_index] = 1.0e3
+        right_index = torch.argmin(right_loss, 0)
     
     beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
     
@@ -178,7 +181,7 @@ def main():
     
     # Define losses
     alpha = 1.0e-1
-    no_iters = 150
+    no_iters = 200
     
     pose_lst = []
     grad_lst = []

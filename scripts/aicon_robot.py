@@ -78,16 +78,16 @@ def calc_losses(beam_poses, beam_targets, left_hand, right_hand, tol=1.0e-2):
     pin_indices = list(2 * k * state_dim + i + state_dim for k in range(4) for i in range(state_dim))
     
     # We want the loss per beam or per hand
-    beam_loss = nn.MSELoss(reduce="sum")
+    beam_loss = nn.MSELoss(reduction="sum")
     hand_loss = nn.MSELoss(reduction='none')
         
     beam_losses = beam_loss(beam_poses, beam_targets)
     
-    left_loss = hand_loss(beam_poses, left_hand)
-    right_loss = hand_loss(beam_poses, right_hand)
+    left_loss = hand_loss(beam_poses, left_hand.repeat(beam_poses.shape[0], 1))
+    right_loss = hand_loss(beam_poses, right_hand.repeat(beam_poses.shape[0], 1))
     
-    left_contacts = torch.tensor(left_loss.sum(1) < tol, dtype=torch.float32).to(beam_poses.device)
-    right_contacts = torch.tensor(right_loss.sum(1) < tol, dtype=torch.float32).to(beam_poses.device)
+    left_contacts = (left_loss.sum(1) < tol).type(torch.float32)
+    right_contacts = (right_loss.sum(1) < tol).type(torch.float32)
     
     left_loss.view(-1)[pin_indices] *= 2.0
     right_loss.view(-1)[pin_indices] *= 2.0
@@ -108,6 +108,11 @@ def calc_losses(beam_poses, beam_targets, left_hand, right_hand, tol=1.0e-2):
 
 
 def main():
+    # Set seeds
+    seed = 20
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    # Set device
     device = torch.device("cuda")
     # Data processor
     process_data = ProcessData(np.array([1.0, 1.0, 1.0]))  
@@ -150,19 +155,14 @@ def main():
     pose_torch = pose_init_torch.requires_grad_(True)
     
     # Define losses
-    loss_func = nn.MSELoss(reduction="sum")
     alpha = 1.0e-1
-    no_iters = 500
+    no_iters = 50
     
     pose_lst = []
-    loss_lst = []
+    grad_lst = []
     
     left_lst = []
     right_lst = []
-    
-    mask = 1.0 * torch.ones_like(pose_torch, dtype=torch.float32).to(device)
-    
-    counter = 0
     
     for _ in range(no_iters):
         
@@ -174,13 +174,16 @@ def main():
         right_pose = right_pose - alpha * right_grad
         # Calc gradient
         
-        pose_torch = pose_torch - alpha * mask * beam_grads.view(-1)
+        pose_torch = pose_torch - alpha * beam_grads.view(-1)
         pose_torch = normalise_pose(pose_torch, state_dim=process_data.state_dim)
-        # loss_lst.append(loss.clone().detach().cpu().numpy())
+        left_pose = normalise_pose(left_pose, state_dim=process_data.state_dim)
+        right_pose = normalise_pose(right_pose, state_dim=process_data.state_dim)
         
         pose_lst.append(pose_torch)
         left_lst.append(left_pose)
         right_lst.append(right_pose)
+        
+        grad_lst.append(torch.norm(beam_grads, p=2.0) + torch.norm(left_grad, p=2.0) + torch.norm(right_grad, p=2.0))
     
     # Beam Trajectories
     beam_traj = torch.stack(pose_lst, dim=0)
@@ -188,15 +191,17 @@ def main():
     left_traj = torch.stack(left_lst, dim=0)
     right_traj = torch.stack(right_lst, dim=0)
     
+    grad_traj = torch.stack(grad_lst, dim=0)
+    
     beam_traj = torch.cat([left_traj, right_traj, beam_traj], 1)
     
     print(f"Final pose: {pose_torch.detach().cpu().numpy()}")
     print(f"Pose target: {pose_target}")
     # print(f"Loss: {loss.detach().cpu().numpy()}")
     
-    # plt.figure()
-    # plt.plot(loss_lst)
-    # plt.show()
+    plt.figure()
+    plt.plot(grad_traj.detach().cpu().numpy())
+    plt.show()
     
     # Visualise results
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
@@ -222,7 +227,7 @@ def main():
                 viewer.sync()   
                 
                 # Rudimentary time keeping, will drift relative to wall clock.
-                time.sleep(0.01)
+                time.sleep(0.1)
         
     
     return 0    

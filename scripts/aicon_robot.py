@@ -72,10 +72,10 @@ def find_small_index(gradients, dim):
     return torch.argmin(grad_norm)
 
 
-def calc_losses(beam_poses, beam_targets, left_hand, right_hand, tol=1.0e-2):
+def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.0e-2):
     state_dim = 5
     # Pin penalty
-    pin_indices = list(2 * k * state_dim + i + state_dim for k in range(4) for i in range(state_dim))
+    pin_indices = list(2 * k for k in range(4))
     
     # We want the loss per beam or per hand
     beam_loss = nn.MSELoss(reduction="sum")
@@ -83,26 +83,48 @@ def calc_losses(beam_poses, beam_targets, left_hand, right_hand, tol=1.0e-2):
         
     beam_losses = beam_loss(beam_poses, beam_targets)
     
-    left_loss = hand_loss(beam_poses, left_hand.repeat(beam_poses.shape[0], 1))
-    right_loss = hand_loss(beam_poses, right_hand.repeat(beam_poses.shape[0], 1))
-    
-    left_contacts = (left_loss.sum(1) < tol).type(torch.float32)
-    right_contacts = (right_loss.sum(1) < tol).type(torch.float32)
-    
-    left_loss.view(-1)[pin_indices] *= 2.0
-    right_loss.view(-1)[pin_indices] *= 2.0
-    
-    # Find smallest gradients
-    left_index = torch.argmin(left_loss.sum(dim=1), 0)
-    right_index = torch.argmin(right_loss.sum(dim=1), 0)
+    left_loss = hand_loss(beam_poses, left_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
+    right_loss = hand_loss(beam_poses, right_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
     
     # Beam gradients
     beam_gradients = grad(outputs=beam_losses, inputs=beam_poses, retain_graph=True)[0]
+    
+    gradient_reshaped = beam_gradients.view(-1, state_dim)
+    grad_norm = torch.norm(gradient_reshaped, p=2.0, dim=1)
+    # Item with largest gradient
+    max_idx = torch.argmin(grad_norm)
+    min_val = grad_norm[max_idx]
+    while min_val < 0.01:
+        counter += 1
+        if counter >= beam_gradients.shape[0]:
+            beam_gradients *= 0.0
+            break
+        
+        gradient_reshaped[max_idx, :] *= 1.0e6
+        left_loss[max_idx] *= 1.0e6
+        right_loss[max_idx] *= 1.0e6      
+        
+        grad_norm = torch.norm(gradient_reshaped, p=2.0, dim=1)
+        max_idx = torch.argmin(grad_norm)
+        min_val = grad_norm[max_idx]
+        
+    # Use loss to calculate contacts
+    left_contacts = (left_loss < tol).type(torch.float32)
+    right_contacts = (right_loss < tol).type(torch.float32)
+    
+    left_loss[pin_indices] *= 2.0
+    right_loss[pin_indices] *= 2.0
+    
+    # Find smallest gradients
+    left_index = torch.argmin(left_loss, 0)
+    right_loss[left_index] = 1.0e3
+    right_index = torch.argmin(right_loss, 0)    
+    
     beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
     
     # Hand gradients
-    left_gradients = grad(left_loss.sum(dim=1)[left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[left_index]) + beam_gradients[left_index, :]
-    right_gradients = grad(right_loss.sum(dim=1)[right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[right_index]) + beam_gradients[right_index, :]
+    left_gradients = grad(left_loss[left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[left_index]) + beam_gradients[left_index, :]
+    right_gradients = grad(right_loss[right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[right_index]) + beam_gradients[right_index, :]
     
     return beam_gradients, left_gradients, right_gradients    
 
@@ -156,7 +178,7 @@ def main():
     
     # Define losses
     alpha = 1.0e-1
-    no_iters = 50
+    no_iters = 150
     
     pose_lst = []
     grad_lst = []
@@ -164,9 +186,12 @@ def main():
     left_lst = []
     right_lst = []
     
+    counter = 0
+    
     for _ in range(no_iters):
         
-        beam_grads, left_grad, right_grad = calc_losses(pose_torch.view(-1, 5),
+        beam_grads, left_grad, right_grad = calc_losses(counter,
+                                                        pose_torch.view(-1, 5),
                                                         pose_tar_torch.view(-1, 5),
                                                         left_pose,
                                                         right_pose)

@@ -75,7 +75,7 @@ def find_small_index(gradients, dim):
 def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.0e-2):
     state_dim = 5
     # Pin penalty
-    pin_indices = list(2 * k for k in range(4))
+    pin_indices = list(2 * k + 1 for k in range(4))
     
     # We want the loss per beam or per hand
     beam_loss = nn.MSELoss(reduction="sum")

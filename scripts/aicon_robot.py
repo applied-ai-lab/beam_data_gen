@@ -134,7 +134,7 @@ def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.
 
 def main():
     # Set seeds
-    seed = 20
+    seed = 42
     np.random.seed(seed)
     torch.manual_seed(seed)
     # Set device
@@ -184,10 +184,13 @@ def main():
     no_iters = 200
     
     pose_lst = []
-    grad_lst = []
     
     left_lst = []
     right_lst = []
+    
+    beam_grad_lst = []
+    left_grad_lst = []
+    right_grad_lst = []
     
     counter = 0
     
@@ -211,7 +214,9 @@ def main():
         left_lst.append(left_pose)
         right_lst.append(right_pose)
         
-        grad_lst.append(torch.norm(beam_grads, p=2.0) + torch.norm(left_grad, p=2.0) + torch.norm(right_grad, p=2.0))
+        beam_grad_lst.append(torch.norm(beam_grads, p=2.0))
+        left_grad_lst.append(torch.norm(left_grad, p=2.0))
+        right_grad_lst.append(torch.norm(right_grad, p=2.0))
     
     # Beam Trajectories
     beam_traj = torch.stack(pose_lst, dim=0)
@@ -219,7 +224,9 @@ def main():
     left_traj = torch.stack(left_lst, dim=0)
     right_traj = torch.stack(right_lst, dim=0)
     
-    grad_traj = torch.stack(grad_lst, dim=0)
+    beam_grad_traj = torch.stack(beam_grad_lst, dim=0)
+    left_grad_traj = torch.stack(left_grad_lst, dim=0)
+    right_grad_traj = torch.stack(right_grad_lst, dim=0)
     
     beam_traj = torch.cat([left_traj, right_traj, beam_traj], 1)
     
@@ -228,7 +235,9 @@ def main():
     # print(f"Loss: {loss.detach().cpu().numpy()}")
     
     plt.figure()
-    plt.plot(grad_traj.detach().cpu().numpy())
+    plt.plot(beam_grad_traj.detach().cpu().numpy())
+    plt.plot(left_grad_traj.detach().cpu().numpy())
+    plt.plot(right_grad_traj.detach().cpu().numpy())
     plt.show()
     
     # Visualise results

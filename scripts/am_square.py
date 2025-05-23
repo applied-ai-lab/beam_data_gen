@@ -26,6 +26,9 @@ from beam_data_gen.models.datasets.trajectory_dataset import TrajectoryDataset, 
 from beam_data_gen.models.parameters.beam_vae_params import BeamVaeParams
 from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.encoders.beam_robot_encoder import BeamRobotEncoder
+from beam_data_gen.models.encoders.encoder import Encoder
+from beam_data_gen.models.decoders.decoder import Decoder
+from beam_data_gen.models.classifiers.graph_classifier import GraphClassifier
 from beam_data_gen.models.vaes.beam_vae_pp import (BeamVaeParams,
                                               BeamVae, BeamEncoder, LatentVarsBase,
                                               BeamVaeInputs, BeamVaeOutputs,
@@ -53,8 +56,8 @@ def main():
 
     model = BeamVae(vae_params, 
                 train_params,
-                EncoderBase,
-                BeamDecoder,
+                Encoder,
+                Decoder,
                 IndependentClassifier).to(vae_params.device)
     
     model.load_state_dict(torch.load(vae_params.in_path))
@@ -100,7 +103,7 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
     
-    latents.z = 1.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_(True)
+    latents.z = 0.0 * torch.ones([1, vae_params.latent_dim], dtype=torch.float32).to(vae_params.device).requires_grad_(True)
     latent_list = []
     
     grad_features = 100 * torch.ones(latents.z.shape, dtype=torch.float32).to(vae_params.device)

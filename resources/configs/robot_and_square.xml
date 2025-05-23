@@ -68,13 +68,13 @@
         <!-- Hand -->
         <body name="left_hand" pos="0.150 0.554 0.25" quat="1 0 0 0">
             <freejoint />
-            <geom name="robot_left_hand" type="box" size="0.031 0.031 0.01" rgba="1 1 1 1" material="beam_mat"/>
+            <geom name="robot_left_hand" type="box" size="0.031 0.031 0.01" rgba="0 0 1 1" material="beam_mat"/>
         </body>
 
         <!-- Hand -->
         <body name="right_hand" pos="0.150 -0.000 0.25" quat="1 0 0 0">
             <freejoint />
-            <geom name="robot_right_hand" type="box" size="0.031 0.031 0.01" rgba="1 1 1 1" material="beam_mat"/>
+            <geom name="robot_right_hand" type="box" size="0.031 0.031 0.01" rgba="1 0 0 1" material="beam_mat"/>
         </body>
 
     </worldbody>

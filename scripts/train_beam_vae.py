@@ -52,6 +52,9 @@ def train(model: BeamRobotVae, dataloader, optimizer):
         loss = model.loss_func(inputs, latents, outputs)
         loss.tot_loss.backward()
         
+        # Apply gradient normalisation
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
         total_loss += loss.tot_loss.item()
         kl_loss += loss.kl.item()
         mse_loss += loss.mse.item()
@@ -125,7 +128,7 @@ def main():
                         train_params,
                         Encoder,
                         Decoder,
-                        IndependentClassifier).to(vae_params.device)
+                        GraphClassifier).to(vae_params.device)
     
     if train_params.read_from_file:
         model.load_state_dict(torch.load(vae_params.in_path))

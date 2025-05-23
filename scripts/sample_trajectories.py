@@ -83,7 +83,7 @@ def main():
     d = mujoco.MjData(m)
 
     # Initialise the classes
-    trans_lims = [0.30, 0.30, 0.0]
+    trans_lims = [0.50, 0.50, 0.0]
     sampler = BeamSampler(trans_lims)
 
     # Beam config graph
@@ -136,6 +136,7 @@ def main():
                         
                         # Create the datasaver
                         datasaver = DataSaver(graph)
+                        datasaver.save_relative_pose = True
                                         
                         # Start loop and sample pose
                         while viewer.is_running() and counter < params.no_samples:
@@ -159,7 +160,8 @@ def main():
                             
                             # Save data if nto in collision
                             collision, nodes = check_graph_collisions(d, graph)
-                            if not collision:
+                            if True:
+                            # if not collision:
                                 # Data saver append graph
                                 datasaver.append_graph(graph)
                                 counter += 1
@@ -177,7 +179,7 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            path_dir = os.path.join("data/trajectories_square_small_1")
+            path_dir = os.path.join("data/trajectories_square_local")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
             data_df.to_pickle(os.path.join(path_dir, str(name) + ".pkl"))           

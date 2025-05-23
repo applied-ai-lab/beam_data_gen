@@ -7,8 +7,9 @@ import numpy as np
 import mujoco
 from mujoco import MjModel, MjData
 import mujoco.viewer
+import networkx as nx
 
-from beam_data_gen.beam_impl.robot_graph import (l_connected_robot, l_pin_removed_robot, l_disconnected_robot, RobotGraph)
+from beam_data_gen.beam_impl.robot_graph import (square_graphs, RobotGraph)
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler, PoseSamplerParams
 from beam_data_gen.data_sampling.data_saver import DataSaver
 
@@ -23,19 +24,45 @@ def pose_to_q(trans, rot):
 
 
 def set_q(q_pos, q_pos_dict):
-    q_pos[0:7] = pose_to_q(q_pos_dict["l_beam_1"].trans, q_pos_dict["l_beam_1"].orient)
-    q_pos[7:14] = pose_to_q(q_pos_dict["l_beam_2"].trans, q_pos_dict["l_beam_2"].orient)
-    q_pos[14:21] = pose_to_q(q_pos_dict["l_pin_A"].trans, q_pos_dict["l_pin_A"].orient)
-    q_pos[21:28] = pose_to_q(q_pos_dict["robot_left_hand"].trans, q_pos_dict["robot_left_hand"].orient)
-    q_pos[28:35] = pose_to_q(q_pos_dict["robot_right_hand"].trans, q_pos_dict["robot_right_hand"].orient)
+    # Ramp components
+    q_pos[0:7] = pose_to_q(q_pos_dict["square_beam_1"].trans, q_pos_dict["square_beam_1"].orient)
+    q_pos[7:14] = pose_to_q(q_pos_dict["square_pin_A"].trans, q_pos_dict["square_pin_A"].orient)
+    q_pos[14:21] = pose_to_q(q_pos_dict["square_beam_2"].trans, q_pos_dict["square_beam_2"].orient)
+    q_pos[21:28] = pose_to_q(q_pos_dict["square_pin_B"].trans, q_pos_dict["square_pin_B"].orient)
+    q_pos[28:35] = pose_to_q(q_pos_dict["square_beam_3"].trans, q_pos_dict["square_beam_3"].orient)
+    q_pos[35:42] = pose_to_q(q_pos_dict["square_pin_C"].trans, q_pos_dict["square_pin_C"].orient)
+    q_pos[42:49] = pose_to_q(q_pos_dict["square_beam_4"].trans, q_pos_dict["square_beam_4"].orient)
+    q_pos[49:56] = pose_to_q(q_pos_dict["square_pin_D"].trans, q_pos_dict["square_pin_D"].orient)
+    # Hands
+    q_pos[56:63] = pose_to_q(q_pos_dict["robot_left_hand"].trans, q_pos_dict["robot_left_hand"].orient)
+    q_pos[63:70] = pose_to_q(q_pos_dict["robot_right_hand"].trans, q_pos_dict["robot_right_hand"].orient)
     return
 
     
 def check_graph_collisions(data, ramp_graph: RobotGraph):
+    
+    # Step 1: Compute connected components
+    components = list(nx.connected_components(ramp_graph.graph))
+
+    # Step 2: Create a mapping from node to component ID
+    node_to_component = {}
+    for idx, comp in enumerate(components):
+        for node in comp:
+            node_to_component[node] = idx
+
+    # Step 3: Function to check if two nodes are in the same component
+    def same_component(node1, node2):
+        return node_to_component.get(node1) == node_to_component.get(node2)
+    
     collision = False
-    geom_to_name = {1: "l_beam_1",
-                    2: "l_beam_2",
-                    3: "l_pin_A"}
+    geom_to_name = {1: "square_beam_1",
+                    2: "square_pin_A",
+                    3: "square_beam_2",
+                    4: "square_pin_B",
+                    5: "square_beam_3",
+                    6: "square_pin_C",
+                    7: "square_beam_4",
+                    8: "square_pin_D"}
     for i in range(data.ncon):  # Iterate through contacts
         contact = data.contact[i]
         geom1 = contact.geom1
@@ -44,31 +71,34 @@ def check_graph_collisions(data, ramp_graph: RobotGraph):
         if geom1 not in geom_to_name.keys() or geom2 not in geom_to_name.keys():
             continue
         # If there is a contact between two items which are not connected return true
-        elif not ramp_graph.graph.has_edge(geom_to_name[geom1], geom_to_name[geom2]):
-            return True
-    return collision
-          
+        elif not same_component(geom_to_name[geom1], geom_to_name[geom2]):
+            return True, [geom_to_name[geom1], geom_to_name[geom2]]
+    return collision, []
+
 
 
 def main():
 
-    m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_beams.xml')
+    m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
 
     # Initialise the classes
-    trans_lims = [0.0, 0.0, 0.0]
+    trans_lims = [0.50, 0.50, 0.0]
     sampler = BeamSampler(trans_lims)
 
     # Beam config graph
-    graphs = {"connected": l_connected_robot, 
-              "pin_removed": l_pin_removed_robot, 
-              "disconnected": l_disconnected_robot}
+    graphs = square_graphs
     
     # Hand connections
     left_connections = [None,
-                        "l_beam_1",
-                        "l_beam_2",
-                        "l_pin_A"]
+                        "square_beam_1",
+                        "square_pin_A",
+                        "square_beam_2",
+                        "square_pin_B",
+                        "square_beam_3",
+                        "square_pin_C",
+                        "square_beam_4",
+                        "square_pin_D"]
     right_connections = copy.deepcopy(left_connections)
     
     # Set up parameters
@@ -102,11 +132,14 @@ def main():
                         sampler.move_hands(graph, params)
                         traj_counter = 0
                         
+                        counter = 0
+                        
                         # Create the datasaver
                         datasaver = DataSaver(graph)
+                        datasaver.save_relative_pose = True
                                         
                         # Start loop and sample pose
-                        while viewer.is_running() and traj_counter < params.no_samples:
+                        while viewer.is_running() and counter < params.no_samples:
                             
                             # mj_step can be replaced with code that also evaluates
                             # a policy and applies a control signal before stepping the physics.
@@ -115,8 +148,9 @@ def main():
                             # Pick up changes to the physics state, apply perturbations, update options from GUI.
                             viewer.sync()
                             
-                            # Save data
-                            # if not check_graph_collisions(d, graph):
+                            if traj_counter >= params.no_samples:
+                                sampler.move_hands(graph, params)
+                                traj_counter = 0
                             
                             # Sample a trajectory given the pose
                             sampler.set_pose_with_traj(graph, traj_counter)
@@ -124,9 +158,18 @@ def main():
                             pose_dict = sampler.graph_to_pose_dict(graph)
                             set_q(d.qpos, pose_dict)  
                             
-                            # Data saver append graph
-                            datasaver.append_graph(graph)
+                            # Save data if nto in collision
+                            collision, nodes = check_graph_collisions(d, graph)
+                            if True:
+                            # if not collision:
+                                # Data saver append graph
+                                datasaver.append_graph(graph)
+                                counter += 1
                             
+                            else:                
+                                print(f"In collision, nodes: {nodes[0]} and {nodes[1]}")
+                                print(left_connection, right_connection, name)
+                                    
                             traj_counter += 1
                             
                             # time.sleep(dt)
@@ -136,10 +179,10 @@ def main():
             
             data_df = pd.DataFrame.from_dict(datasaver_dict, orient="index")
             # Save data
-            path_dir = os.path.join("data/trajectories_small")
+            path_dir = os.path.join("data/trajectories_square_local")
             if not os.path.exists(path_dir):
                 os.makedirs(path_dir)
-            data_df.to_pickle(os.path.join(path_dir, name + ".pkl"))           
+            data_df.to_pickle(os.path.join(path_dir, str(name) + ".pkl"))           
 
     return 0
 

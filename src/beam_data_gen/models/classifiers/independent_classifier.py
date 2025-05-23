@@ -95,3 +95,8 @@ class IndependentClassifier(Classifier):
     def no_predictions(self):
         self._no_predictions = self.find_no_non_zero_values(self.vae_params.no_classifier_nodes)
         return self._no_predictions
+    
+    @property
+    def independent_latent_dim(self):
+        self._independent_latent_dim = self.vae_params.latent_dim // self.no_predictions
+        return self._independent_latent_dim

@@ -7,17 +7,26 @@ import pandas as pd
 import torch
 from scipy.spatial.transform import Rotation as R
 
+from assembly_tools.types import PoseType
+
 
 
 class ProcessData:
-    def __init__(self, pos_lims: np.array):
+    def __init__(self, pos_lims: np.array, state_dim: int = 5):
         self._pos_lims = pos_lims
+        self._state_dim = state_dim
         
     def load_data(self, dir_path: str) -> List[pd.DataFrame]:
         pd_files = []        
         for root, _, files in os.walk(dir_path):
             pd_files = list(pd.read_pickle(os.path.join(root, file)) for file in files)  
         return pd_files   
+    
+    def extract_pose_from_type(self, data: PoseType):
+        return data.to_pose_quat()
+    
+    def pose_to_rep(self, data: PoseType):
+        return self.extract_pose(self.extract_pose_from_type(data).reshape(-1, 7))
     
     def extract_pose(self, data: np.array):
         pos = data[:, 0:3]
@@ -29,7 +38,7 @@ class ProcessData:
         return np.hstack([pos, np.sin(theta_z).reshape(-1, 1), np.cos(theta_z).reshape(-1, 1)])
     
     def denorm_output(self, x_pred: torch.tensor):
-        state_dim = 5
+        state_dim = self._state_dim
         
         pos_lim = torch.tensor(self._pos_lims, dtype=x_pred.dtype, device=x_pred.device)
         
@@ -73,3 +82,7 @@ class ProcessData:
     
     def __call__(self, dir_path, beam_names):
         return self.extract_data(dir_path, beam_names)
+    
+    @property
+    def state_dim(self):
+        return self._state_dim

@@ -20,6 +20,9 @@ from beam_data_gen.models.parameters.beam_train_params import TrainParams
 from beam_data_gen.models.vaes.beam_vae_pp import BeamVae
 from beam_data_gen.models.classifiers.linear_classifier import LinearClassifier
 from beam_data_gen.models.classifiers.independent_classifier import IndependentClassifier
+from beam_data_gen.models.encoders.encoder import Encoder
+from beam_data_gen.models.decoders.decoder import Decoder
+from beam_data_gen.models.classifiers.graph_classifier import GraphClassifier
 from beam_data_gen.models.decoders.beam_robot_decoder import BeamRobotDecoder
 from beam_data_gen.models.classifiers.space_classifier import SpaceClassifier
 from beam_data_gen.models.vaes.beam_robot_vae import (BeamVaeParams,
@@ -48,6 +51,9 @@ def train(model: BeamRobotVae, dataloader, optimizer):
 
         loss = model.loss_func(inputs, latents, outputs)
         loss.tot_loss.backward()
+        
+        # Apply gradient normalisation
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         
         total_loss += loss.tot_loss.item()
         kl_loss += loss.kl.item()
@@ -107,7 +113,7 @@ def main():
     ##########################################
     # Process data
     process_data = ProcessTrajectories(np.array(vae_params.pos_lims), device=vae_params.device)
-    poses, flat_adj = process_data(train_params.data_path, ["robot_left_hand", "robot_right_hand", "l_beam_1", "l_beam_2", "l_pin_A"])
+    poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
 
     # Create dataset and dataloaders
     dataset_class = TrajectoryDataset(poses, flat_adj, vae_params.no_inputs, vae_params.no_outputs)
@@ -120,9 +126,9 @@ def main():
 
     model = BeamVae(vae_params, 
                         train_params,
-                        EncoderBase,
-                        BeamDecoder,
-                        IndependentClassifier).to(vae_params.device)
+                        Encoder,
+                        Decoder,
+                        GraphClassifier).to(vae_params.device)
     
     if train_params.read_from_file:
         model.load_state_dict(torch.load(vae_params.in_path))

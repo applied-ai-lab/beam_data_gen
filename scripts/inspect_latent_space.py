@@ -53,8 +53,8 @@ def main():
     # Inspect Latent Space
     latent_inspector = BeamLSInspector(model, vae_params)
     
-    # Load test data
-    process_data = ProcessTrajectories(vae_params.pos_lims, vae_params.device)
+    # Process data    
+    process_data = ProcessTrajectories(np.array(vae_params.pos_lims), device=vae_params.device)
     poses, flat_adj = process_data(train_params.data_path, vae_params.graph_nodes)
     
     no_inputs = 1000
@@ -70,6 +70,9 @@ def main():
 
     (latent_dims, mean_var) = latent_inspector.find_latent_dims(model_inputs)
     
+    # Sort latents
+    binned_latents = latent_inspector.bin_latent_dims(latent_dims, model._classifier._independent_latent_dim)
+    
     # Sample from 2d circle
     no_samps = 300
     x, y = latent_inspector.sample_latent_values_from_unit_circle_2d(radius=2.5, no_samps=no_samps)
@@ -80,24 +83,34 @@ def main():
     print(latent_dims)
     print(mean_var)
     
-    for i in range(latent_dims.shape[0]):
-        j = copy.deepcopy(i)
-        while j < latent_dims.shape[0]:
-            latents_for_plotting.z[:, latent_dims[i]] = x
-            latents_for_plotting.z[:, latent_dims[j]] = y
+    for sub_latent, small_latents in binned_latents.items():
+    
+        for i in range(len(small_latents)):
+            j = copy.deepcopy(i)
+            while j < len(small_latents):
+                # Set all the latents to zero prior to plotting
+                latents_for_plotting.z *= 0.0
+                
+                latents_for_plotting.z[:, small_latents[i]] = x
+                latents_for_plotting.z[:, small_latents[j]] = y
 
-            # Classify the graphs      
-            graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
-            title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
-            fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
-            
-            file_path = os.path.join('figures', 'latent_space', f'VAE_0_latent_{i}_{j}')
-            print(file_path)
-            plt.savefig(file_path)
-            
-            plt.close(fig)
-            
-            j += 1
+                # Classify the graphs      
+                graphs_for_plotting = torch.sigmoid(model.classifier(latents_for_plotting.z)).round()
+                title = f"Latent dim {i} and {j}, VAE {os.path.basename(vae_params.in_path)}"
+                fig, axes = latent_inspector.plot_latents(x, y, graphs_for_plotting[:, :, :], title)
+                
+                file_dir = os.path.join('figures', 'latent_space') #, f'latent_{sub_latent}')
+                
+                if not os.path.exists(file_dir):
+                    os.mkdir(file_dir)
+                
+                file_path = os.path.join(file_dir,  f'VAE_latent_{small_latents[i]}_{small_latents[j]}')
+                print(file_path)
+                plt.savefig(file_path)
+                
+                plt.close(fig)
+                
+                j += 1
     
     return 0
 

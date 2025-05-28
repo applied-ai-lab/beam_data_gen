@@ -3,7 +3,7 @@ from typing import List
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from beam_data_gen.beam_impl.robot_graph import RobotGraph, RampGraph
+from beam_data_gen.beam_impl.robot_graph import RobotGraph, RampGraph, nx
 from beam_data_gen.models.datasets.process_data import ProcessData
 
 
@@ -12,6 +12,15 @@ class SquareRobotSim:
         self._data_processor = process_data
         
         self._node_pose_dict = {}
+        
+        self._geom_to_name = {1: "square_beam_1",
+                            2: "square_pin_A",
+                            3: "square_beam_2",
+                            4: "square_pin_B",
+                            5: "square_beam_3",
+                            6: "square_pin_C",
+                            7: "square_beam_4",
+                            8: "square_pin_D"}
     
     def pose_to_q(self, trans, rot):
         pose = np.zeros(7)
@@ -36,23 +45,49 @@ class SquareRobotSim:
         for (node, data) in nodes_data:
             self._node_pose_dict[node] = data["pose"]
         return self._node_pose_dict
+    
+    def check_collisions(self, data, item_name: str) -> bool:
         
-    def check_graph_collisions(self, data, ramp_graph: RobotGraph):
-        collision = False
-        geom_to_name = {1: "l_beam_1",
-                        2: "l_beam_2",
-                        3: "l_pin_A"}
+        for i in range(data.ncon):
+            contact = data.contact[i]
+            geom1 = contact.geom1
+            geom2 = contact.geom2
+            
+            if geom1 not in self._geom_to_name.keys() or geom2 not in self._geom_to_name.keys():
+                continue
+            else:
+                if self._geom_to_name[geom1] == item_name:
+                    return True
+                if self._geom_to_name[geom2] == item_name:
+                    return True     
+        return False
+
+    def check_graph_collisions(self, data, ramp_graph: RobotGraph) -> List:
+    
+        # Step 1: Compute connected components
+        components = list(nx.connected_components(ramp_graph.graph))
+
+        # Step 2: Create a mapping from node to component ID
+        node_to_component = {}
+        for idx, comp in enumerate(components):
+            for node in comp:
+                node_to_component[node] = idx
+
+        # Step 3: Function to check if two nodes are in the same component
+        def same_component(node1, node2):
+            return node_to_component.get(node1) == node_to_component.get(node2)
+        
         for i in range(data.ncon):  # Iterate through contacts
             contact = data.contact[i]
             geom1 = contact.geom1
             geom2 = contact.geom2
             
-            if geom1 not in geom_to_name.keys() or geom2 not in geom_to_name.keys():
+            if geom1 not in self._geom_to_name.keys() or geom2 not in self._geom_to_name.keys():
                 continue
             # If there is a contact between two items which are not connected return true
-            elif not ramp_graph.graph.has_edge(geom_to_name[geom1], geom_to_name[geom2]):
-                return True
-        return collision
+            elif not same_component(self._geom_to_name[geom1], self._geom_to_name[geom2]):
+                return [self._geom_to_name[geom1], self._geom_to_name[geom2]]
+        return []
     
     def decode_x(self, data, x_pred):
         denorm_output = self._data_processor.denorm_output(x_pred)[:, :].cpu().detach().numpy()

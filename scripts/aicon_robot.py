@@ -179,6 +179,10 @@ def main():
     pose_init_torch = torch.tensor(pose_init, dtype=torch.float32).to(device)
     pose_torch = pose_init_torch.requires_grad_(True)
     
+    # Simulate results
+    m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
+    d = mujoco.MjData(m)
+    
     # Define losses
     alpha = 1.0e-1
     no_iters = 200
@@ -196,21 +200,29 @@ def main():
     
     for _ in range(no_iters):
         
+        # Create beam vec for sim
+        beam_vec = torch.cat([left_pose, right_pose, pose_torch], dim=0).unsqueeze(0)
+        # Update simulation
+        sim.decode_x(d, beam_vec)
+        
+        # Calc gradients
         beam_grads, left_grad, right_grad = calc_losses(counter,
                                                         pose_torch.view(-1, 5),
                                                         pose_tar_torch.view(-1, 5),
                                                         left_pose,
                                                         right_pose,
                                                         tol=1e-3)
+        # Update the poses
         left_pose = left_pose - alpha * left_grad
         right_pose = right_pose - alpha * right_grad
-        # Calc gradient
-        
         pose_torch = pose_torch - alpha * beam_grads.view(-1)
+        
+        # Update SE(3) transforms
         pose_torch = normalise_pose(pose_torch, state_dim=process_data.state_dim)
         left_pose = normalise_pose(left_pose, state_dim=process_data.state_dim)
         right_pose = normalise_pose(right_pose, state_dim=process_data.state_dim)
         
+        # Store trajectories
         pose_lst.append(pose_torch)
         left_lst.append(left_pose)
         right_lst.append(right_pose)
@@ -240,10 +252,6 @@ def main():
     plt.plot(left_grad_traj.detach().cpu().numpy())
     plt.plot(right_grad_traj.detach().cpu().numpy())
     plt.show()
-    
-    # Visualise results
-    m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
-    d = mujoco.MjData(m)
     
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:

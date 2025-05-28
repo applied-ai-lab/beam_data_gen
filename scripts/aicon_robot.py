@@ -129,7 +129,7 @@ def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.
     left_gradients = grad(left_loss[left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[left_index]) + beam_gradients[left_index, :]
     right_gradients = grad(right_loss[right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[right_index]) + beam_gradients[right_index, :]
     
-    return beam_gradients, left_gradients, right_gradients    
+    return beam_gradients, left_gradients, right_gradients, left_index, right_index    
 
 
 def main():
@@ -198,38 +198,54 @@ def main():
     
     counter = 0
     
-    for _ in range(no_iters):
+    # Visualisation runs
+    with mujoco.viewer.launch_passive(m, d) as viewer:
         
-        # Create beam vec for sim
-        beam_vec = torch.cat([left_pose, right_pose, pose_torch], dim=0).unsqueeze(0)
-        # Update simulation
-        sim.decode_x(d, beam_vec)
-        
-        # Calc gradients
-        beam_grads, left_grad, right_grad = calc_losses(counter,
-                                                        pose_torch.view(-1, 5),
-                                                        pose_tar_torch.view(-1, 5),
-                                                        left_pose,
-                                                        right_pose,
-                                                        tol=1e-3)
-        # Update the poses
-        left_pose = left_pose - alpha * left_grad
-        right_pose = right_pose - alpha * right_grad
-        pose_torch = pose_torch - alpha * beam_grads.view(-1)
-        
-        # Update SE(3) transforms
-        pose_torch = normalise_pose(pose_torch, state_dim=process_data.state_dim)
-        left_pose = normalise_pose(left_pose, state_dim=process_data.state_dim)
-        right_pose = normalise_pose(right_pose, state_dim=process_data.state_dim)
-        
-        # Store trajectories
-        pose_lst.append(pose_torch)
-        left_lst.append(left_pose)
-        right_lst.append(right_pose)
-        
-        beam_grad_lst.append(torch.norm(beam_grads, p=2.0))
-        left_grad_lst.append(torch.norm(left_grad, p=2.0))
-        right_grad_lst.append(torch.norm(right_grad, p=2.0))
+        input("continue")
+    
+        for _ in range(no_iters):
+            
+            # Calc gradients
+            beam_grads, left_grad, right_grad, left_beam, right_beam = calc_losses(counter,
+                                                                                pose_torch.view(-1, 5),
+                                                                                pose_tar_torch.view(-1, 5),
+                                                                                left_pose,
+                                                                                right_pose,
+                                                                                tol=1e-3)
+            # Update the poses
+            left_pose = left_pose - alpha * left_grad
+            right_pose = right_pose - alpha * right_grad
+            pose_torch = pose_torch - alpha * beam_grads.view(-1)
+            
+            # Update SE(3) transforms
+            pose_torch = normalise_pose(pose_torch, state_dim=process_data.state_dim)
+            left_pose = normalise_pose(left_pose, state_dim=process_data.state_dim)
+            right_pose = normalise_pose(right_pose, state_dim=process_data.state_dim)
+            
+            # Create beam vec for sim
+            beam_vec = torch.cat([left_pose, right_pose, pose_torch], dim=0).unsqueeze(0)
+            # Update simulation
+            sim.decode_x(d, beam_vec)
+            mujoco.mj_step(m, d)
+            
+            # Perform collision avoidance
+            print(f" Left Collisions   : {sim.check_collisions(d, node_names[left_beam])}")
+            print(f" Right Collisions  : {sim.check_collisions(d, node_names[right_beam])}")
+            
+            # Pick up changes to the physics state, apply perturbations, update options from GUI.
+            viewer.sync()   
+                
+            # Rudimentary time keeping, will drift relative to wall clock.
+            time.sleep(0.1)
+                    
+            # Store trajectories
+            pose_lst.append(pose_torch)
+            left_lst.append(left_pose)
+            right_lst.append(right_pose)
+            
+            beam_grad_lst.append(torch.norm(beam_grads, p=2.0))
+            left_grad_lst.append(torch.norm(left_grad, p=2.0))
+            right_grad_lst.append(torch.norm(right_grad, p=2.0))
     
     # Beam Trajectories
     beam_traj = torch.stack(pose_lst, dim=0)
@@ -252,29 +268,6 @@ def main():
     plt.plot(left_grad_traj.detach().cpu().numpy())
     plt.plot(right_grad_traj.detach().cpu().numpy())
     plt.show()
-    
-    # Visualisation runs
-    with mujoco.viewer.launch_passive(m, d) as viewer:
-        
-        input("continue")
-        
-        # Start loop and sample pose
-        while viewer.is_running():
-            for k in range(beam_traj.shape[0]):
-                
-                # Decoder the prediction
-                sim.decode_x(d, beam_traj[k:k+1, :])
-                                
-                # mj_step can be replaced with code that also evaluates
-                # a policy and applies a control signal before stepping the physics.
-                mujoco.mj_step(m, d)    
-
-                # Pick up changes to the physics state, apply perturbations, update options from GUI.
-                viewer.sync()   
-                
-                # Rudimentary time keeping, will drift relative to wall clock.
-                time.sleep(0.1)
-        
     
     return 0    
 

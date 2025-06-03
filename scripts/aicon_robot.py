@@ -1,5 +1,7 @@
 from typing import List
 import time
+from enum import Enum
+    
 
 import numpy as np
 import torch
@@ -14,6 +16,12 @@ from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGra
 from beam_data_gen.models.datasets.process_data import ProcessData
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
+
+
+class HandEnum(Enum):
+    """Class to handle contact constraints."""
+    LEFT_HAND = 0
+    RIGHT_HAND = 1
 
 
 def graph_to_pose(graph: RampGraph, node_names: List[str], data_processor: ProcessData):
@@ -130,13 +138,7 @@ def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.
     left_gradients = grad(left_loss[left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[left_index]) + beam_gradients[left_index, :]
     right_gradients = grad(right_loss[right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[right_index]) + beam_gradients[right_index, :]
     
-    if not left_contacts[0]:
-        left_index = None
-    
-    if not right_contacts[0]:
-        right_index = None
-    
-    return beam_gradients, left_gradients, right_gradients, left_index, right_index    
+    return beam_gradients, left_gradients, right_gradients, left_index, right_index
 
 
 def simulate_particles(sim, model, data, pose, name_idx, node_names, particles, weights):
@@ -163,37 +165,30 @@ def apply_particles(sim, model, data, pose, name_idx, node_names, particles, wei
     state_dim = 5
     # Check if there are collisions
     mujoco.mj_step(model, data)
-    if not sim.check_collisions(data, node_names[name_idx]):
-        return
-    else:
-        
-        # Simulate particles
-        simulate_particles(sim, model, data, pose, name_idx, node_names, particles, weights)
-        # Resample
-        weights += 1e-10
-        weights /= weights.sum()
-        
-        indices = systematic_resample(weights)
-        particles = particles[indices]
-        
-        pose[0, name_idx * state_dim + 2 * state_dim: (name_idx + 1) * state_dim + 2 * state_dim] += particles[0]
-        
-        if name_idx >= 8:
-            import pdb
-            pdb.set_trace()
-        
-        # Normalise
-        normalise_pose(pose, state_dim)
-        # Update data
-        sim.decode_x(data, pose)
-        # Update the sim
-        mujoco.mj_step(model, data)
+    
+    # Simulate particles
+    simulate_particles(sim, model, data, pose, name_idx, node_names, particles, weights)
+    # Resample
+    weights += 1e-10
+    weights /= weights.sum()
+    
+    indices = systematic_resample(weights)
+    particles = particles[indices]
+    
+    pose[0, name_idx * state_dim + 2 * state_dim: (name_idx + 1) * state_dim + 2 * state_dim] += particles[0]
+    
+    # Normalise
+    normalise_pose(pose, state_dim)
+    # Update data
+    sim.decode_x(data, pose)
+    # Update the sim
+    mujoco.mj_step(model, data)
     return 
 
 
 def main():
     # Set seeds
-    seed = 42
+    seed = 1000
     np.random.seed(seed)
     torch.manual_seed(seed)
     # Set device
@@ -258,15 +253,15 @@ def main():
     counter = 0
     
     # No. particles
-    N = 100 
-    left_particles =  0.10 * torch.randn([N, process_data.state_dim], dtype=torch.float32).to(device)
-    right_particles = 0.10 * torch.randn([N, process_data.state_dim], dtype=torch.float32).to(device)
+    N = 100
     
-    left_particles[:, 0:2] *= 0.0
+    w = torch.tensor([0.025, 0.025, 0.10, 0.1, 0.1], dtype=torch.float32).to(device)
+    left_particles =  w * torch.randn([N, process_data.state_dim], dtype=torch.float32).to(device)
+    right_particles = w * torch.randn([N, process_data.state_dim], dtype=torch.float32).to(device)
+    
     left_particles[:, 2] **= 2.0
     left_particles[:, 2] **= 0.5
     
-    right_particles[:, 0:2] *= 0.0
     right_particles[:, 2] **= 2.0
     right_particles[:, 2] **= 0.5
     
@@ -304,17 +299,14 @@ def main():
             mujoco.mj_step(m, d)
             
             # Perform collision avoidance
-            if left_beam is not None:
-                apply_particles(sim, m, d, beam_vec, left_beam, node_names, left_particles, left_weights)
-            
-            if right_beam is not None:
-                apply_particles(sim, m, d, beam_vec, right_beam, node_names, right_particles, right_weights)
+            apply_particles(sim, m, d, beam_vec, left_beam, node_names, left_particles, left_weights)
+            apply_particles(sim, m, d, beam_vec, right_beam, node_names, right_particles, right_weights)
                 
             # Pick up changes to the physics state, apply perturbations, update options from GUI.
             viewer.sync()   
                 
             # Rudimentary time keeping, will drift relative to wall clock.
-            time.sleep(0.1)
+            # time.sleep(0.1)
                     
             # Store trajectories
             pose_lst.append(pose_torch)

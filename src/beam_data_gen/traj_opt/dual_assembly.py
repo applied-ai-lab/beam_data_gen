@@ -4,10 +4,33 @@ from torch.autograd import grad
 import numpy as np
 import mujoco
 from filterpy.monte_carlo import systematic_resample
+from tqdm import trange
 
 from beam_data_gen.traj_opt.traj_opt_base import (TrajOptParams, TrajOptBase)
 from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
+
+class ParticleTrajectories:
+    def __init__(self):
+        self.particles: torch.Tensor 
+        self.indices: torch.Tensor
+        self.no_live_particles = torch.Tensor
+        self.loss = torch.Tensor
+        
+    def sample_trajectory(self):
+        traj_len = self.particles.shape[1]
+        
+        # Shape [traj len, features]
+        trajectory = torch.zeros([self.particles.shape[1], self.particles.shape[2]], dtype=torch.float32)
+        
+        particle_idx = 0
+        
+        for k in range(traj_len - 1, -1, -1):
+            trajectory[k, :] = self.particles[particle_idx, k, :]
+            particle_idx = self.indices[k, particle_idx]
+        
+        return trajectory            
+        
 
 class DualAssembly(TrajOptBase):
     def __init__(self, params: TrajOptParams, state_dim: int, sim: SquareRobotSim):
@@ -19,6 +42,8 @@ class DualAssembly(TrajOptBase):
         self._left_index = -1
         self._right_index = -1
         
+        self.node_names = list(self.sim._geom_to_name.values())
+        
         # Quantities
         self._counter = 0
         self._no_hands = 2
@@ -26,26 +51,34 @@ class DualAssembly(TrajOptBase):
         self._beam_loss = nn.MSELoss(reduction="sum")
         self._hand_loss = nn.MSELoss(reduction='none')    
     
-    def optimise(self, model, data):
+    def optimise(self, model, data) -> ParticleTrajectories:
+        
+        part_traj = ParticleTrajectories()
         
         self._counter = 0
-        particles = torch.zeros([self.params.no_particles, self.params.no_steps + 1, self._x.shape[0]], dtype=self._x.dtype).to(self._x.device)
-        weights = torch.zeros([self.params.no_particles], dtype=self._x.dtype).to(self._x.device)
+        part_traj.particles = torch.zeros([self.params.no_particles, self.params.no_steps, self._x.shape[0]], dtype=self._x.dtype).to(self._x.device)
+        part_traj.indices = torch.zeros([self.params.no_steps, self.params.no_particles], dtype=torch.int32)
+        part_traj.no_live_particles = torch.zeros([self.params.no_steps], dtype=torch.int32)
+        part_traj.loss = torch.zeros([self.params.no_particles, self.params.no_steps], dtype=torch.float32)
         
-        for k in range(self._params.no_steps):
+        weights = np.zeros([self.params.no_particles])
+        
+        for k in trange(self._params.no_steps):
             for n in range(self._params.no_particles):
             
-                x_grads = self._gradients()
+                x_grads, beam_losses = self._gradients(self.params.epsilon)
+                
+                part_traj.loss[n, k] = beam_losses.sum()
                 
                 # Apply noise to gradients
                 noise = 1.0 / float(k + 1) * torch.randn_like(x_grads)
-                self._x = self._x - self.params.step_size * (x_grads + 0.1 * noise)
+                self._x = self._x - self.params.step_size * (x_grads + 0.01 * noise)
                 
                 self.normalise_pose(self._x)
-                particles[n, k, :] = self._x
+                part_traj.particles[n, k, :] = self._x
                 
                 # Check collisions
-                self.sim.decode_x(data, self._x)
+                self.sim.decode_x(data, self._x.unsqueeze(0))
                 mujoco.mj_step(model, data)
                 
                 # Check for collisions with moving beams
@@ -53,15 +86,16 @@ class DualAssembly(TrajOptBase):
                     weights[n] = 1.0e-5
                 else:
                     weights[n] = 1.0
+                    part_traj.no_live_particles[k] += 1
             
             # Resample particles
-            weights += 1e-6
             weights /= weights.sum()
             
             indices = systematic_resample(weights)
-            particles[:, k, :] = particles[indices, k, :]
+            part_traj.particles[:, k, :] = part_traj.particles[indices, k, :]
+            part_traj.indices[k] = torch.tensor(indices)
         
-        return particles
+        return part_traj
     
     
     def _gradients(self, tol: float):
@@ -103,7 +137,7 @@ class DualAssembly(TrajOptBase):
         left_gradients = grad(left_loss[self._left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + beam_gradients[self._left_index, :]
         right_gradients = grad(right_loss[self._right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + beam_gradients[self._right_index, :]
         
-        return torch.cat([left_gradients, right_gradients, beam_gradients], dim=0)
+        return torch.cat([left_gradients, right_gradients, beam_gradients.view(-1)], dim=0), beam_losses
     
     def check_convergence(self, gradient, counter):
         gradient_reshaped = gradient.view(-1, self.state_dim)
@@ -133,7 +167,6 @@ class DualAssembly(TrajOptBase):
             pose_torch[self.state_dim * k + 3: self.state_dim * k + 5] = torch.nn.functional.normalize(pose_torch[self.state_dim * k + 3: self.state_dim * k + 5], dim=0)
         return pose_torch
     
-    @x.setter
-    def x(self, left_hand, right_hand, beams):
+    def set_x(self, left_hand, right_hand, beams):
         self._x = torch.cat([left_hand, right_hand, beams], dim=0)
-        return
+        return 

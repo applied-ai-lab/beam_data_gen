@@ -79,10 +79,10 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
     
-    params = TrajOptParams(step_size=0.1,
-                            no_steps=200,
+    params = TrajOptParams(step_size=0.01,
+                            no_steps=50,
                             epsilon=1.e-2,
-                            no_particles=1)
+                            no_particles=200)
     
     traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim)
     
@@ -92,6 +92,10 @@ def main():
     
     # Optimise
     particles = traj_opt.optimise(m, d)
+    
+    plt.figure()
+    plt.plot(particles.no_live_particles)
+    plt.show()
     
     trajectory, indices = particles.sample_trajectory()
     
@@ -115,7 +119,7 @@ def main():
                 viewer.sync()   
                 
                 # Rudimentary time keeping, will drift relative to wall clock.
-                time.sleep(0.2)
+                time.sleep(0.5)
     
     return 0    
 

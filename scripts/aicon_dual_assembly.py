@@ -10,7 +10,7 @@ from torch.autograd import grad
 from matplotlib import pyplot as plt
 import mujoco
 import mujoco.viewer
-from filterpy.monte_carlo import systematic_resample
+from tqdm import trange
 
 from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGraph
 from beam_data_gen.models.datasets.process_data import ProcessData
@@ -30,7 +30,7 @@ def graph_to_pose(graph: RampGraph, node_names: List[str], data_processor: Proce
 
 def main():
     # Set seeds
-    seed = 42
+    seed = 1000
     np.random.seed(seed)
     torch.manual_seed(seed)
     # Set device
@@ -79,10 +79,10 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
     
-    params = TrajOptParams(step_size=0.001,
+    params = TrajOptParams(step_size=0.1,
                             no_steps=200,
-                            epsilon=1.e-3,
-                            no_particles=100)
+                            epsilon=1.e-2,
+                            no_particles=1)
     
     traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim)
     
@@ -93,10 +93,29 @@ def main():
     # Optimise
     particles = traj_opt.optimise(m, d)
     
-    import pdb
-    pdb.set_trace()
+    trajectory, indices = particles.sample_trajectory()
     
-    trajectory = particles.sample_trajectory()
+    # Visualisation runs
+    with mujoco.viewer.launch_passive(m, d) as viewer:
+        
+        input("continue")
+        
+        # Start loop and sample pose
+        while viewer.is_running():
+            for k in trange(trajectory.shape[0]):
+                
+                # Decoder the prediction
+                sim.decode_x(d, trajectory[k:k+1, :])
+                                
+                # mj_step can be replaced with code that also evaluates
+                # a policy and applies a control signal before stepping the physics.
+                mujoco.mj_step(m, d)    
+
+                # Pick up changes to the physics state, apply perturbations, update options from GUI.
+                viewer.sync()   
+                
+                # Rudimentary time keeping, will drift relative to wall clock.
+                time.sleep(0.2)
     
     return 0    
 

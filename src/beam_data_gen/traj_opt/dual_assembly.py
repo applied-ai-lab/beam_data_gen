@@ -23,13 +23,17 @@ class ParticleTrajectories:
         # Shape [traj len, features]
         trajectory = torch.zeros([self.particles.shape[1], self.particles.shape[2]], dtype=torch.float32)
         
+        indices = [0] * traj_len
+        
         particle_idx = 0
         
         for k in range(traj_len - 1, -1, -1):
             trajectory[k, :] = self.particles[particle_idx, k, :]
             particle_idx = self.indices[k, particle_idx]
+            
+            indices[k] = particle_idx
         
-        return trajectory            
+        return trajectory, indices            
         
 
 class DualAssembly(TrajOptBase):
@@ -43,6 +47,9 @@ class DualAssembly(TrajOptBase):
         self._right_index = -1
         
         self.node_names = list(self.sim._geom_to_name.values())
+        
+        self.left_loss = None
+        self.right_loss = None
         
         # Quantities
         self._counter = 0
@@ -63,6 +70,9 @@ class DualAssembly(TrajOptBase):
         
         weights = np.zeros([self.params.no_particles])
         
+        w = torch.tensor([0.005, 0.005, 0.10, 0.1, 0.1], dtype=torch.float32).to(self._x.device)
+        w = w.repeat(self._x.shape[0] // self.state_dim)
+        
         for k in trange(self._params.no_steps):
             for n in range(self._params.no_particles):
             
@@ -71,10 +81,10 @@ class DualAssembly(TrajOptBase):
                 part_traj.loss[n, k] = beam_losses.sum()
                 
                 # Apply noise to gradients
-                noise = 1.0 / float(k + 1) * torch.randn_like(x_grads)
-                self._x = self._x - self.params.step_size * (x_grads + 0.01 * noise)
+                # noise = 1.0 / float(k + 1) * torch.randn_like(x_grads)
+                self._x = self._x - self.params.step_size * x_grads
                 
-                self.normalise_pose(self._x)
+                self._x = self.normalise_pose(self._x)
                 part_traj.particles[n, k, :] = self._x
                 
                 # Check collisions
@@ -99,72 +109,79 @@ class DualAssembly(TrajOptBase):
     
     
     def _gradients(self, tol: float):
+        
+        # Pin penalty
+        pin_indices = list(2 * k + 1 for k in range(4))
+        
         left_hand = self._x[0:self.state_dim]
         right_hand = self._x[self.state_dim: 2 * self.state_dim]
         beam_poses = self._x[self._no_hands * self.state_dim: ].view(-1, self.state_dim)
         # Calculate losses
         beam_losses = self._beam_loss(beam_poses, self.goal.view(-1, self.state_dim))
         # Hand losses
-        left_loss = self._hand_loss(beam_poses, left_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
-        right_loss = self._hand_loss(beam_poses, right_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
-        
-        # Use loss to calculate contacts
-        left_contacts = (left_loss < tol).type(torch.float32)
-        right_contacts = (right_loss < tol).type(torch.float32)
+        self.left_loss = self._hand_loss(beam_poses, left_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
+        self.right_loss = self._hand_loss(beam_poses, right_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
         
         # Calculate gradients
         beam_gradients = grad(outputs=beam_losses, inputs=beam_poses, retain_graph=True)[0]
         
         # Check if any of the goals have converged
-        index = self.check_convergence(beam_gradients, self._counter)
+        self.check_convergence(beam_gradients, self._counter)        
         
-        # Update hand losses to ignore assembling these
-        left_loss[index] *= 1.0e6
-        right_loss[index] *= 1.0e6
+        # Use loss to calculate contacts
+        left_contacts = (self.left_loss < tol).type(torch.float32)
+        right_contacts = (self.right_loss < tol).type(torch.float32)
+        
+        self.left_loss[pin_indices] *= 2.0
+        self.right_loss[pin_indices] *= 2.0
         
         # Find smallest gradients
-        self._right_index = torch.argmin(right_loss, 0)
-        self._left_index = torch.argmin(left_loss, 0)
+        self._right_index = torch.argmin(self.right_loss, 0)
+        self._left_index = torch.argmin(self.left_loss, 0)
         
         # Figure out what to do if a beam is equi-distant
         if self._right_index == self._left_index:
-            right_loss[self._right_index] = 1.0e3
-            self._right_index = torch.argmin(right_loss, 0)
+            self.right_loss[self._right_index] = 1.0e3
+            self._right_index = torch.argmin(self.right_loss, 0)
             
         beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
     
         # Hand gradients
-        left_gradients = grad(left_loss[self._left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + beam_gradients[self._left_index, :]
-        right_gradients = grad(right_loss[self._right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + beam_gradients[self._right_index, :]
+        left_gradients = grad(self.left_loss[self._left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + beam_gradients[self._left_index, :]
+        right_gradients = grad(self.right_loss[self._right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + beam_gradients[self._right_index, :]
         
         return torch.cat([left_gradients, right_gradients, beam_gradients.view(-1)], dim=0), beam_losses
     
     def check_convergence(self, gradient, counter):
-        gradient_reshaped = gradient.view(-1, self.state_dim)
-        grad_norm = torch.norm(gradient_reshaped, p=2.0, dim=1)
+        
+        grad_norm = torch.norm(gradient, p=2.0, dim=1)
         # Item with largest gradient
         index = torch.argmin(grad_norm)
         min_val = grad_norm[index]
         
-        while min_val < 0.01:
+        while min_val < self.params.epsilon:
             
             counter += 1
-            if counter >= gradient_reshaped.shape[0]:
+            if counter >= gradient.shape[0]:
                 gradient *= 0.0
                 break
             
-            gradient_reshaped[index, :] *= 1.0e6      
+            gradient[index, :] *= 1.0e6      
             
-            grad_norm = torch.norm(gradient_reshaped, p=2.0, dim=1)
+            self.left_loss[index] *= 1.0e6
+            self.right_loss[index] *= 1.0e6
+            
+            grad_norm = torch.norm(gradient, p=2.0, dim=1)
             index = torch.argmin(grad_norm)
-            min_val = grad_norm[index]
+            min_val = grad_norm[index]           
             
-        return index
+        return
     
     def normalise_pose(self, pose_torch: torch.tensor):
         no_items = pose_torch.shape[0] // self.state_dim    
         for k in range(no_items):
-            pose_torch[self.state_dim * k + 3: self.state_dim * k + 5] = torch.nn.functional.normalize(pose_torch[self.state_dim * k + 3: self.state_dim * k + 5], dim=0)
+            pose_torch[self.state_dim * k + 3: self.state_dim * k + 5] = \
+                torch.nn.functional.normalize(pose_torch[self.state_dim * k + 3: self.state_dim * k + 5], dim=0)
         return pose_torch
     
     def set_x(self, left_hand, right_hand, beams):

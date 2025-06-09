@@ -90,7 +90,7 @@ class SquareRobotSim:
         return []
     
     def decode_x(self, data, x_pred):
-        denorm_output = self._data_processor.denorm_output(x_pred)[:, :].cpu().detach().numpy()
+        denorm_output = self._data_processor.denorm_output(x_pred).cpu().detach().numpy()
         beam_out = denorm_output[:, 2*5:]
         robot_out = denorm_output[:, 0:2*5]
         

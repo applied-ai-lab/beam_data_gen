@@ -37,7 +37,13 @@ class ParticleTrajectories:
         
 
 class DualAssembly(TrajOptBase):
-    def __init__(self, params: TrajOptParams, state_dim: int, sim: SquareRobotSim):
+    def __init__(self, 
+                params: TrajOptParams, 
+                state_dim: int, 
+                sim: SquareRobotSim,
+                left_start: torch.Tensor,
+                right_start: torch.Tensor):
+        
         super().__init__(params)
         self.state_dim = state_dim
         
@@ -50,6 +56,9 @@ class DualAssembly(TrajOptBase):
         
         self.left_loss = None
         self.right_loss = None
+        
+        self.left_start = left_start
+        self.right_start = right_start
         
         # Quantities
         self._counter = 0
@@ -70,7 +79,7 @@ class DualAssembly(TrajOptBase):
         
         weights = np.zeros([self.params.no_particles])
         
-        self.w = torch.tensor([0.01, 0.01, 1.0, 0.2, 0.2], dtype=torch.float32).to(self._x.device)
+        self.w = torch.tensor([0.01, 0.01, 0.1, 0.2, 0.2], dtype=torch.float32).to(self._x.device)
         
         for k in trange(self._params.no_steps):
             for n in range(self._params.no_particles):
@@ -130,12 +139,15 @@ class DualAssembly(TrajOptBase):
         left_contacts = (self.left_loss < tol).type(torch.float32)
         right_contacts = (self.right_loss < tol).type(torch.float32)
         
-        self.left_loss[pin_indices] *= 2.0
-        self.right_loss[pin_indices] *= 2.0
+        self.left_loss[pin_indices] *= 10.0
+        self.right_loss[pin_indices] *= 10.0
+        
+        left_start_loss = self._hand_loss(beam_poses, self.left_start.repeat(beam_poses.shape[0], 1)).sum(dim=1)
+        right_start_loss = self._hand_loss(beam_poses, self.right_start.repeat(beam_poses.shape[0], 1)).sum(dim=1)
         
         # Find smallest gradients
-        self._right_index = torch.argmin(self.right_loss, 0)
-        self._left_index = torch.argmin(self.left_loss, 0)
+        self._right_index = torch.argmin(self.right_loss + right_start_loss, 0)
+        self._left_index = torch.argmin(self.left_loss + left_start_loss, 0)
         
         # Figure out what to do if a beam is equi-distant
         if self._right_index == self._left_index:
@@ -145,7 +157,7 @@ class DualAssembly(TrajOptBase):
         beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
         # Apply noises
         noise = torch.randn_like(beam_gradients)
-        beam_gradients += max(min(torch.norm(beam_gradients, p=2.0), 1.0), 0.1) * noise * self.w
+        beam_gradients += max(min(torch.norm(beam_gradients, p=2.0), 1.0), 0.01) * noise * self.w
         beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
         
         beam_gradients[:, 3:5] *= 2.0

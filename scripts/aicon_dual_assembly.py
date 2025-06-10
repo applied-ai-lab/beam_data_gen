@@ -80,11 +80,13 @@ def main():
     d = mujoco.MjData(m)
     
     params = TrajOptParams(step_size=0.01,
-                            no_steps=80,
+                            no_steps=100,
                             epsilon=1.e-2,
                             no_particles=30)
     
-    traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim)
+    traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim,
+                            left_start=left_pose.clone(),
+                            right_start=right_pose.clone())
     
     # Set the values
     traj_opt.set_x(left_pose, right_pose, pose_init_torch)
@@ -110,7 +112,7 @@ def main():
                 
                 # Decoder the prediction
                 sim.decode_x(d, trajectory[k:k+1, :])
-                                
+                
                 # mj_step can be replaced with code that also evaluates
                 # a policy and applies a control signal before stepping the physics.
                 mujoco.mj_step(m, d)    
@@ -119,7 +121,7 @@ def main():
                 viewer.sync()   
                 
                 # Rudimentary time keeping, will drift relative to wall clock.
-                time.sleep(0.5)
+                time.sleep(0.2)
     
     return 0    
 

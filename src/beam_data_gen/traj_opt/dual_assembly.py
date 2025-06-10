@@ -70,18 +70,16 @@ class DualAssembly(TrajOptBase):
         
         weights = np.zeros([self.params.no_particles])
         
-        w = torch.tensor([0.005, 0.005, 0.10, 0.1, 0.1], dtype=torch.float32).to(self._x.device)
-        w = w.repeat(self._x.shape[0] // self.state_dim)
+        self.w = torch.tensor([0.01, 0.01, 1.0, 0.2, 0.2], dtype=torch.float32).to(self._x.device)
         
         for k in trange(self._params.no_steps):
             for n in range(self._params.no_particles):
             
-                x_grads, beam_losses = self._gradients(self.params.epsilon)
+                x_grads, beam_losses = self._gradients(1.e-3)
                 
                 part_traj.loss[n, k] = beam_losses.sum()
                 
                 # Apply noise to gradients
-                # noise = 1.0 / float(k + 1) * torch.randn_like(x_grads)
                 self._x = self._x - self.params.step_size * x_grads
                 
                 self._x = self.normalise_pose(self._x)
@@ -143,9 +141,12 @@ class DualAssembly(TrajOptBase):
         if self._right_index == self._left_index:
             self.right_loss[self._right_index] = 1.0e3
             self._right_index = torch.argmin(self.right_loss, 0)
-            
+        
+        # Apply noises
+        noise = torch.randn_like(beam_gradients)
+        beam_gradients += min(torch.norm(beam_gradients, p=2.0), 1.0) * noise * self.w
         beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
-    
+        
         # Hand gradients
         left_gradients = grad(self.left_loss[self._left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + beam_gradients[self._left_index, :]
         right_gradients = grad(self.right_loss[self._right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + beam_gradients[self._right_index, :]
@@ -180,6 +181,7 @@ class DualAssembly(TrajOptBase):
     def normalise_pose(self, pose_torch: torch.tensor):
         no_items = pose_torch.shape[0] // self.state_dim    
         for k in range(no_items):
+            pose_torch[self.state_dim * k + 2] = max(pose_torch[self.state_dim * k + 2], 0.021)
             pose_torch[self.state_dim * k + 3: self.state_dim * k + 5] = \
                 torch.nn.functional.normalize(pose_torch[self.state_dim * k + 3: self.state_dim * k + 5], dim=0)
         return pose_torch

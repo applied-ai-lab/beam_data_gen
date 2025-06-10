@@ -82,7 +82,7 @@ def main():
     params = TrajOptParams(step_size=0.01,
                             no_steps=50,
                             epsilon=1.e-2,
-                            no_particles=200)
+                            no_particles=30)
     
     traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim)
     

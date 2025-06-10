@@ -142,10 +142,13 @@ class DualAssembly(TrajOptBase):
             self.right_loss[self._right_index] = 1.0e3
             self._right_index = torch.argmin(self.right_loss, 0)
         
+        beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
         # Apply noises
         noise = torch.randn_like(beam_gradients)
-        beam_gradients += min(torch.norm(beam_gradients, p=2.0), 1.0) * noise * self.w
+        beam_gradients += max(min(torch.norm(beam_gradients, p=2.0), 1.0), 0.1) * noise * self.w
         beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
+        
+        beam_gradients[:, 3:5] *= 2.0
         
         # Hand gradients
         left_gradients = grad(self.left_loss[self._left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + beam_gradients[self._left_index, :]

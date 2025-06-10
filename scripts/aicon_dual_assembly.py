@@ -80,7 +80,7 @@ def main():
     d = mujoco.MjData(m)
     
     params = TrajOptParams(step_size=0.01,
-                            no_steps=50,
+                            no_steps=80,
                             epsilon=1.e-2,
                             no_particles=30)
     

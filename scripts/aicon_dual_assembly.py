@@ -99,7 +99,8 @@ def main():
     plt.plot(particles.no_live_particles)
     plt.show()
     
-    trajectory, indices = particles.sample_trajectory()
+    indices = particles.sample_indices()
+    trajectory = particles.sample_trajectories(indices)
     
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:

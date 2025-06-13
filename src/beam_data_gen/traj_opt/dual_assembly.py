@@ -1,3 +1,5 @@
+from typing import List
+
 import torch
 from torch import nn
 from torch.autograd import grad
@@ -17,23 +19,24 @@ class ParticleTrajectories:
         self.no_live_particles = torch.Tensor
         self.loss = torch.Tensor
         
-    def sample_trajectory(self):
+    def sample_indices(self) -> List[int]:
         traj_len = self.particles.shape[1]
         
-        # Shape [traj len, features]
-        trajectory = torch.zeros([self.particles.shape[1], self.particles.shape[2]], dtype=torch.float32)
-        
         indices = [0] * traj_len
-        
-        particle_idx = 0
+        particle_idx = np.random.choice(self.indices[-1, :])
         
         for k in range(traj_len - 1, -1, -1):
-            trajectory[k, :] = self.particles[particle_idx, k, :]
-            particle_idx = self.indices[k, particle_idx]
-            
+            particle_idx = self.indices[k, particle_idx].item()
             indices[k] = particle_idx
         
-        return trajectory, indices            
+        return indices            
+    
+    def sample_trajectories(self, indices) -> torch.Tensor:
+        _, time_steps, no_features = self.particles.shape
+        particles = torch.zeros([time_steps, no_features], dtype=self.particles.dtype).to(self.particles.device)
+        for k, idx in enumerate(indices):
+            particles[k, :] = self.particles[idx, k, :]
+        return particles
         
 
 class DualAssembly(TrajOptBase):
@@ -60,6 +63,9 @@ class DualAssembly(TrajOptBase):
         self.left_start = left_start
         self.right_start = right_start
         
+        # Noise weights
+        self.w = torch.tensor([0.1, 0.1, 0.1, 0.2, 0.2], dtype=torch.float32).to(self._x.device)
+        
         # Quantities
         self._counter = 0
         self._no_hands = 2
@@ -78,8 +84,6 @@ class DualAssembly(TrajOptBase):
         part_traj.loss = torch.zeros([self.params.no_particles, self.params.no_steps], dtype=torch.float32)
         
         weights = np.zeros([self.params.no_particles])
-        
-        self.w = torch.tensor([0.01, 0.01, 0.1, 0.2, 0.2], dtype=torch.float32).to(self._x.device)
         
         for k in trange(self._params.no_steps):
             for n in range(self._params.no_particles):
@@ -157,7 +161,7 @@ class DualAssembly(TrajOptBase):
         beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
         # Apply noises
         noise = torch.randn_like(beam_gradients)
-        beam_gradients += max(min(torch.norm(beam_gradients, p=2.0), 1.0), 0.01) * noise * self.w
+        beam_gradients += min(torch.norm(beam_gradients, p=2.0), 1.0) * noise * self.w
         beam_gradients = (beam_gradients * left_contacts.reshape(beam_gradients.shape[0], 1) + beam_gradients * right_contacts.reshape(beam_gradients.shape[0], 1))
         
         beam_gradients[:, 3:5] *= 2.0

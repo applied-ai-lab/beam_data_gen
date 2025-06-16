@@ -86,14 +86,15 @@ def main():
     
     traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim,
                             left_start=left_pose.clone(),
-                            right_start=right_pose.clone())
+                            right_start=right_pose.clone(),
+                            model=m, data=d)
     
     # Set the values
     traj_opt.set_x(left_pose, right_pose, pose_init_torch)
     traj_opt.goal = pose_tar_torch
     
     # Optimise
-    particles = traj_opt.optimise(m, d)
+    particles = traj_opt.optimise()
     
     plt.figure()
     plt.plot(particles.no_live_particles)

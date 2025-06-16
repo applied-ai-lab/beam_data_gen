@@ -7,6 +7,7 @@ import numpy as np
 import mujoco
 from filterpy.monte_carlo import systematic_resample
 from tqdm import trange
+import mujoco
 
 from beam_data_gen.traj_opt.traj_opt_base import (TrajOptParams, TrajOptBase)
 from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
@@ -45,7 +46,9 @@ class DualAssembly(TrajOptBase):
                 state_dim: int, 
                 sim: SquareRobotSim,
                 left_start: torch.Tensor,
-                right_start: torch.Tensor):
+                right_start: torch.Tensor, 
+                model: mujoco.MjModel,
+                data: mujoco.MjData):
         
         super().__init__(params)
         self.state_dim = state_dim
@@ -75,6 +78,10 @@ class DualAssembly(TrajOptBase):
         self._beam_loss = nn.MSELoss(reduction="sum")
         self._hand_loss = nn.MSELoss(reduction='none')  
         
+        # Mujoco pointers
+        self._mu_model = model
+        self._mu_data = data
+        
         # Containers for solutions
         self._particle_trajectories = None        
         
@@ -99,7 +106,7 @@ class DualAssembly(TrajOptBase):
         return
         
     
-    def optimise(self, model, data) -> ParticleTrajectories:
+    def optimise(self) -> ParticleTrajectories:
         
         # Create or reset the containers
         if self._particle_trajectories is None:
@@ -121,11 +128,11 @@ class DualAssembly(TrajOptBase):
                 self._particle_trajectories.particles[n, k, :] = self._x
                 
                 # Check collisions
-                self.sim.decode_x(data, self._x.unsqueeze(0))
-                mujoco.mj_step(model, data)
+                self.sim.decode_x(self._mu_data, self._x.unsqueeze(0))
+                mujoco.mj_step(self._mu_model, self._mu_data)
                 
                 # Check for collisions with moving beams
-                if self.sim.check_collisions(data, self.node_names[self._left_index]) or self.sim.check_collisions(data, self.node_names[self._right_index]):
+                if self.sim.check_collisions(self._mu_data, self.node_names[self._left_index]) or self.sim.check_collisions(self._mu_data, self.node_names[self._right_index]):
                     self._weights[n] = 1.0e-5
                 else:
                     self._weights[n] = 1.0

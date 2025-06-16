@@ -63,11 +63,13 @@ class DualAssembly(TrajOptBase):
         self.left_start = left_start
         self.right_start = right_start
         
-        # Noise weights
-        self.w = torch.tensor([0.1, 0.1, 0.1, 0.2, 0.2], dtype=torch.float32).to(self._x.device)
+        # Noise weights 
+        self.w = torch.tensor([0.1, 0.1, 0.1, 0.2, 0.2], dtype=torch.float32).to(self.params.device)
+        
+        # Convergence dict
+        self._convergence = {}
         
         # Quantities
-        self._counter = 0
         self._no_hands = 2
         # Losses
         self._beam_loss = nn.MSELoss(reduction="sum")
@@ -77,7 +79,6 @@ class DualAssembly(TrajOptBase):
         
         part_traj = ParticleTrajectories()
         
-        self._counter = 0
         part_traj.particles = torch.zeros([self.params.no_particles, self.params.no_steps, self._x.shape[0]], dtype=self._x.dtype).to(self._x.device)
         part_traj.indices = torch.zeros([self.params.no_steps, self.params.no_particles], dtype=torch.int32)
         part_traj.no_live_particles = torch.zeros([self.params.no_steps], dtype=torch.int32)
@@ -137,7 +138,7 @@ class DualAssembly(TrajOptBase):
         beam_gradients = grad(outputs=beam_losses, inputs=beam_poses, retain_graph=True)[0]
         
         # Check if any of the goals have converged
-        self.check_convergence(beam_gradients, self._counter)        
+        self.check_convergence(beam_gradients)        
         
         # Use loss to calculate contacts
         left_contacts = (self.left_loss < tol).type(torch.float32)
@@ -172,7 +173,7 @@ class DualAssembly(TrajOptBase):
         
         return torch.cat([left_gradients, right_gradients, beam_gradients.view(-1)], dim=0), beam_losses
     
-    def check_convergence(self, gradient, counter):
+    def check_convergence(self, gradient):
         
         grad_norm = torch.norm(gradient, p=2.0, dim=1)
         # Item with largest gradient
@@ -181,8 +182,9 @@ class DualAssembly(TrajOptBase):
         
         while min_val < self.params.epsilon:
             
-            counter += 1
-            if counter >= gradient.shape[0]:
+            self._convergence[index.item()] = True
+            
+            if len(self._convergence.keys()) >= gradient.shape[0]:
                 gradient *= 0.0
                 break
             

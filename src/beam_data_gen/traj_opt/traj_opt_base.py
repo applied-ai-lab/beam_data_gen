@@ -16,6 +16,7 @@ class TrajOptParams:
         self.no_steps = no_steps   # Number of optimisation steps
         self.epsilon = epsilon     # Convergence criteria for optimisation
         self.no_particles = no_particles # Number of particles
+        self.device = torch.device("cuda") # Device
         
 
 class TrajOptBase:

@@ -73,31 +73,52 @@ class DualAssembly(TrajOptBase):
         self._no_hands = 2
         # Losses
         self._beam_loss = nn.MSELoss(reduction="sum")
-        self._hand_loss = nn.MSELoss(reduction='none')    
+        self._hand_loss = nn.MSELoss(reduction='none')  
+        
+        # Containers for solutions
+        self._particle_trajectories = None        
+        
+    def initialise(self):
+        # Create container
+        self._particle_trajectories = ParticleTrajectories()
+        # Allocate container
+        self._particle_trajectories.particles = torch.zeros([self.params.no_particles, self.params.no_steps, self._x.shape[0]], dtype=self._x.dtype).to(self._x.device)
+        self._particle_trajectories.indices = torch.zeros([self.params.no_steps, self.params.no_particles], dtype=torch.int32)
+        self._particle_trajectories.no_live_particles = torch.zeros([self.params.no_steps], dtype=torch.int32)
+        self._particle_trajectories.loss = torch.zeros([self.params.no_particles, self.params.no_steps], dtype=torch.float32)
+        # Weights
+        self._weights = np.zeros([self.params.no_particles])
+        return      
+    
+    def reset(self):
+        self._particle_trajectories.particles.zero_()
+        self._particle_trajectories.indices.zero_()
+        self._particle_trajectories.no_live_particles.zero_()
+        self._particle_trajectories.loss.zero_()
+        self._weights.zero_()
+        return
+        
     
     def optimise(self, model, data) -> ParticleTrajectories:
         
-        part_traj = ParticleTrajectories()
-        
-        part_traj.particles = torch.zeros([self.params.no_particles, self.params.no_steps, self._x.shape[0]], dtype=self._x.dtype).to(self._x.device)
-        part_traj.indices = torch.zeros([self.params.no_steps, self.params.no_particles], dtype=torch.int32)
-        part_traj.no_live_particles = torch.zeros([self.params.no_steps], dtype=torch.int32)
-        part_traj.loss = torch.zeros([self.params.no_particles, self.params.no_steps], dtype=torch.float32)
-        
-        weights = np.zeros([self.params.no_particles])
+        # Create or reset the containers
+        if self._particle_trajectories is None:
+            self.initialise()
+        else:
+            self.reset()
         
         for k in trange(self._params.no_steps):
             for n in range(self._params.no_particles):
             
                 x_grads, beam_losses = self._gradients(1.e-3)
                 
-                part_traj.loss[n, k] = beam_losses.sum()
+                self._particle_trajectories.loss[n, k] = beam_losses.sum()
                 
                 # Apply noise to gradients
                 self._x = self._x - self.params.step_size * x_grads
                 
                 self._x = self.normalise_pose(self._x)
-                part_traj.particles[n, k, :] = self._x
+                self._particle_trajectories.particles[n, k, :] = self._x
                 
                 # Check collisions
                 self.sim.decode_x(data, self._x.unsqueeze(0))
@@ -105,20 +126,19 @@ class DualAssembly(TrajOptBase):
                 
                 # Check for collisions with moving beams
                 if self.sim.check_collisions(data, self.node_names[self._left_index]) or self.sim.check_collisions(data, self.node_names[self._right_index]):
-                    weights[n] = 1.0e-5
+                    self._weights[n] = 1.0e-5
                 else:
-                    weights[n] = 1.0
-                    part_traj.no_live_particles[k] += 1
+                    self._weights[n] = 1.0
+                    self._particle_trajectories.no_live_particles[k] += 1
             
             # Resample particles
-            weights /= weights.sum()
+            self._weights /= self._weights.sum()
             
-            indices = systematic_resample(weights)
-            part_traj.particles[:, k, :] = part_traj.particles[indices, k, :]
-            part_traj.indices[k] = torch.tensor(indices)
+            indices = systematic_resample(self._weights)
+            self._particle_trajectories.particles[:, k, :] = self._particle_trajectories.particles[indices, k, :]
+            self._particle_trajectories.indices[k] = torch.tensor(indices)
         
-        return part_traj
-    
+        return self._particle_trajectories
     
     def _gradients(self, tol: float):
         
@@ -206,6 +226,14 @@ class DualAssembly(TrajOptBase):
             pose_torch[self.state_dim * k + 3: self.state_dim * k + 5] = \
                 torch.nn.functional.normalize(pose_torch[self.state_dim * k + 3: self.state_dim * k + 5], dim=0)
         return pose_torch
+    
+    @property
+    def particle_trajectories(self):
+        if self._x is not None:
+            self.initialise()
+        else:
+            print(" Please set_x to first to allocate data. ")
+        
     
     def set_x(self, left_hand, right_hand, beams):
         self._x = torch.cat([left_hand, right_hand, beams], dim=0)

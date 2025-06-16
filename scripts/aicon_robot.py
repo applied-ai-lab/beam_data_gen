@@ -1,5 +1,7 @@
 from typing import List
 import time
+from enum import Enum
+    
 
 import numpy as np
 import torch
@@ -8,11 +10,18 @@ from torch.autograd import grad
 from matplotlib import pyplot as plt
 import mujoco
 import mujoco.viewer
+from filterpy.monte_carlo import systematic_resample
 
 from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGraph
 from beam_data_gen.models.datasets.process_data import ProcessData
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
+
+
+class HandEnum(Enum):
+    """Class to handle contact constraints."""
+    LEFT_HAND = 0
+    RIGHT_HAND = 1
 
 
 def graph_to_pose(graph: RampGraph, node_names: List[str], data_processor: ProcessData):
@@ -119,6 +128,17 @@ def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.
     right_index = torch.argmin(right_loss, 0)
     left_index = torch.argmin(left_loss, 0)
     
+    contact_state = {}
+    if left_contacts.sum() > 0:
+        contact_state[HandEnum.LEFT_HAND] = left_index
+    else:
+        contact_state[HandEnum.LEFT_HAND] = None
+    if right_contacts.sum() > 0:
+        contact_state[HandEnum.RIGHT_HAND] = right_index
+    else:
+        contact_state[HandEnum.RIGHT_HAND] = None
+        
+    # Figure out what to do if a beam is equi-distant
     if right_index == left_index:
         right_loss[right_index] = 1.0e3
         right_index = torch.argmin(right_loss, 0)
@@ -129,7 +149,57 @@ def calc_losses(counter, beam_poses, beam_targets, left_hand, right_hand, tol=1.
     left_gradients = grad(left_loss[left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[left_index]) + beam_gradients[left_index, :]
     right_gradients = grad(right_loss[right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[right_index]) + beam_gradients[right_index, :]
     
-    return beam_gradients, left_gradients, right_gradients, left_index, right_index    
+    return beam_gradients, left_gradients, right_gradients, left_index, right_index, contact_state
+
+
+def simulate_particles(sim, model, data, pose, name_idx, node_names, particles, weights):
+    state_dim = 5
+    pose_init = pose.clone() 
+    pose_update = pose.clone()
+    for k in range(len(particles)):        
+        pose_update[0, name_idx * state_dim + 2 * state_dim: (name_idx + 1) * state_dim  + 2 * state_dim] = pose_init[0, name_idx * state_dim + 2 * state_dim: (name_idx + 1) * state_dim + 2 * state_dim] + particles[k, :]
+        # Normalise
+        normalise_pose(pose_update, state_dim)
+        # Update data
+        sim.decode_x(data, pose_update)
+        # Update the sim
+        mujoco.mj_step(model, data)
+        # Check for collisions
+        if sim.check_collisions(data, node_names[name_idx]):
+            weights[k] = 1.0e-5
+        else:
+            weights[k] = 1.0
+    return
+
+
+def apply_particles(sim, model, data, pose, name_idx, node_names, particles, weights, contact_states):
+    state_dim = 5
+    # Check if there are collisions
+    mujoco.mj_step(model, data)
+    
+    # Simulate particles
+    simulate_particles(sim, model, data, pose, name_idx, node_names, particles, weights)
+    # Resample
+    weights += 1e-10
+    weights /= weights.sum()
+    
+    indices = systematic_resample(weights)
+    particles = particles[indices]
+    
+    pose[0, name_idx * state_dim + 2 * state_dim: (name_idx + 1) * state_dim + 2 * state_dim] += particles[0]
+    
+    for hand, beam_no in contact_states.items():
+        if beam_no is not None:
+            hand_idx = state_dim * int(hand.value)
+            pose[0, hand_idx: hand_idx + state_dim] = pose[0, beam_no * state_dim + 2 * state_dim: (beam_no + 1) * state_dim + 2 * state_dim]
+    
+    # Normalise
+    normalise_pose(pose, state_dim)
+    # Update data
+    sim.decode_x(data, pose)
+    # Update the sim
+    mujoco.mj_step(model, data)
+    return 
 
 
 def main():
@@ -198,6 +268,22 @@ def main():
     
     counter = 0
     
+    # No. particles
+    N = 100
+    
+    w = torch.tensor([0.025, 0.025, 0.10, 0.2, 0.2], dtype=torch.float32).to(device)
+    left_particles =  w * torch.randn([N, process_data.state_dim], dtype=torch.float32).to(device)
+    right_particles = w * torch.randn([N, process_data.state_dim], dtype=torch.float32).to(device)
+    
+    left_particles[:, 2] **= 2.0
+    left_particles[:, 2] **= 0.5
+    
+    right_particles[:, 2] **= 2.0
+    right_particles[:, 2] **= 0.5
+    
+    left_weights = np.ones(N) / N
+    right_weights = np.ones(N) / N
+    
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
         
@@ -206,12 +292,12 @@ def main():
         for _ in range(no_iters):
             
             # Calc gradients
-            beam_grads, left_grad, right_grad, left_beam, right_beam = calc_losses(counter,
-                                                                                pose_torch.view(-1, 5),
-                                                                                pose_tar_torch.view(-1, 5),
-                                                                                left_pose,
-                                                                                right_pose,
-                                                                                tol=1e-3)
+            beam_grads, left_grad, right_grad, left_beam, right_beam, contact_state = calc_losses(counter,
+                                                                                                pose_torch.view(-1, 5),
+                                                                                                pose_tar_torch.view(-1, 5),
+                                                                                                left_pose,
+                                                                                                right_pose,
+                                                                                                tol=1e-3)
             # Update the poses
             left_pose = left_pose - alpha * left_grad
             right_pose = right_pose - alpha * right_grad
@@ -229,14 +315,14 @@ def main():
             mujoco.mj_step(m, d)
             
             # Perform collision avoidance
-            print(f" Left Collisions   : {sim.check_collisions(d, node_names[left_beam])}")
-            print(f" Right Collisions  : {sim.check_collisions(d, node_names[right_beam])}")
-            
+            apply_particles(sim, m, d, beam_vec, left_beam, node_names, left_particles, left_weights, contact_state)
+            apply_particles(sim, m, d, beam_vec, right_beam, node_names, right_particles, right_weights, contact_state)
+                
             # Pick up changes to the physics state, apply perturbations, update options from GUI.
             viewer.sync()   
                 
             # Rudimentary time keeping, will drift relative to wall clock.
-            time.sleep(0.1)
+            # time.sleep(0.1)
                     
             # Store trajectories
             pose_lst.append(pose_torch)

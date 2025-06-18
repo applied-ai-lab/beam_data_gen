@@ -15,7 +15,7 @@ from tqdm import trange
 from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGraph
 from beam_data_gen.models.datasets.process_data import ProcessData
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler
-from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
+from beam_data_gen.simulator.sim_robot import SimRobot
 from beam_data_gen.traj_opt.dual_assembly import DualAssembly, TrajOptParams
 
 
@@ -34,11 +34,9 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
     # Set device
-    device = torch.device("cuda")
+    device = torch.device("cpu")
     # Data processor
     process_data = ProcessData(np.array([1.0, 1.0, 1.0]))  
-    # Simulator
-    sim = SquareRobotSim(process_data)  
     # Hands
     left_pose = torch.tensor([0.15, 0.55, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
     right_pose = torch.tensor([0.00, 0.00, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
@@ -53,6 +51,8 @@ def main():
                     "square_beam_4",
                     "square_pin_D"]
     no_nodes = len(node_names)
+    # Simulator
+    sim = SimRobot(process_data, node_names)  
     # Define the graph (ignore the hands for now)
     graph: RampGraph = square_connected_graph
     # Find the target
@@ -82,7 +82,8 @@ def main():
     params = TrajOptParams(step_size=0.01,
                             no_steps=100,
                             epsilon=1.e-2,
-                            no_particles=30)
+                            no_particles=30, 
+                            device=device)
     
     traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim,
                             left_start=left_pose.clone(),

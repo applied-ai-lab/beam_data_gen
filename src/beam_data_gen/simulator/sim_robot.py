@@ -7,20 +7,15 @@ from beam_data_gen.beam_impl.robot_graph import RobotGraph, RampGraph, nx
 from beam_data_gen.models.datasets.process_data import ProcessData
 
 
-class SquareRobotSim:
-    def __init__(self, process_data: ProcessData):
+class SimRobot:
+    def __init__(self, 
+                process_data: ProcessData,
+                beam_names = List[str]):
         self._data_processor = process_data
         
         self._node_pose_dict = {}
         
-        self._geom_to_name = {1: "square_beam_1",
-                            2: "square_pin_A",
-                            3: "square_beam_2",
-                            4: "square_pin_B",
-                            5: "square_beam_3",
-                            6: "square_pin_C",
-                            7: "square_beam_4",
-                            8: "square_pin_D"}
+        self._geom_to_name = self._make_geom_dict(beam_names)
     
     def pose_to_q(self, trans, rot):
         pose = np.zeros(7)
@@ -117,4 +112,9 @@ class SquareRobotSim:
         for k in range(2):
             update_data(k, data, robot_out, offset=no_beams*pose_len)
         return
-        
+    
+    def _make_geom_dict(self, names: List[str]):
+        d = {}
+        for k, name in enumerate(names): 
+            d[k + 1] = name
+        return d

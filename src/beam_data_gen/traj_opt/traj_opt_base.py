@@ -7,7 +7,8 @@ class TrajOptParams:
                 step_size: float,
                 no_steps: int,
                 epsilon: float,
-                no_particles: int):
+                no_particles: int, 
+                device: torch.device = torch.device("cuda")):
         
         """ 
         Parameters for trajectory optimisation
@@ -16,7 +17,7 @@ class TrajOptParams:
         self.no_steps = no_steps   # Number of optimisation steps
         self.epsilon = epsilon     # Convergence criteria for optimisation
         self.no_particles = no_particles # Number of particles
-        self.device = torch.device("cuda") # Device
+        self.device = device # Device
         
 
 class TrajOptBase:

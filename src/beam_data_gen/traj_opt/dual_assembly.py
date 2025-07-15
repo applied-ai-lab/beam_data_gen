@@ -38,7 +38,100 @@ class ParticleTrajectories:
         for k, idx in enumerate(indices):
             particles[k, :] = self.particles[idx, k, :]
         return particles
+    
+class StateParams:
+    def __init__(self, state_dim:int, no_beams:int, no_hands:int, device:torch.device, tol: float):
+        self.device = device
+        self.no_hands = no_hands
+        self.no_beams = no_beams
+        self.state_dim = state_dim
+        self.tol = tol
+
+
+class DualArmStates:
+    def __init__(self, params: StateParams):
+        self.params = params
         
+        # Hand poses
+        self.left_pose = torch.zeros(self.params.state_dim).to(self.params.device)
+        self.right_pose = torch.zeros(self.params.state_dim).to(self.params.device)
+        
+        # Beam poses
+        self.beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        
+        # Beam goals
+        self.beam_goal = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        
+        # Pregrasp locations
+        self.pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        
+        # Pregrasp goals
+        self.pregrasp_goal = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+
+
+class LossesContacts:
+    def __init__(self, params: StateParams):
+        self.params = params
+        
+        self._mse_sum = nn.MSELoss(reduction="sum")
+        self._mse_none = nn.MSELoss(reduction='none')
+        
+    def calc_losses(self, states: DualArmStates):
+        pass
+    
+    def calc_prob(self):
+        pass
+        
+        
+class HandLossesContacts(LossesContacts):
+    def __init__(self, params):
+        super().__init__(params)
+        
+        self._pregrasp_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        self._pregrasp_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        
+        self._beam_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        self._beam_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        
+    def calc_losses(self, states: DualArmStates):
+        self._pregrasp_loss[0:self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1), 
+                                            states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        self._pregrasp_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1), 
+                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        
+        self._beam_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+                                            states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        self._beam_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        
+        return
+    
+    def calc_prob(self):
+        self._pregrasp_con = (self._pregrasp_loss < self.params.tol).type(torch.float32)
+        self._beam_con = (self._beam_loss < self.params.tol).type(torch.float32)        
+        return
+    
+    
+class BeamLosses(LossesContacts):
+    def __init__(self, params):
+        super().__init__(params)        
+        self._beam_losses = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        
+    def calc_losses(self, states):
+        self._beam_losses = self._mse_sum(states.beam_poses, states.beam_goal)
+        return
+        
+class PregraspLosses(LossesContacts):
+    def __init__(self, params):
+        super().__init__(params)
+        
+        self.pregrasp_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        
+    def calc_losses(self, states):
+        self.pregrasp_loss = self._mse_sum(states.pregrasp, states.pregrasp_goal)
+        return
+    
+
 
 class DualAssembly(TrajOptBase):
     def __init__(self, 
@@ -85,7 +178,10 @@ class DualAssembly(TrajOptBase):
         # Containers for solutions
         self._particle_trajectories = None        
         
-    def initialise(self):
+    def initialise(self, left_hand, right_hand, beams):
+        self.c = beams.clone()
+        # Set the beam and hand states
+        self.set_x(left_hand, right_hand, beams)
         # Create container
         self._particle_trajectories = ParticleTrajectories()
         # Allocate container
@@ -155,11 +251,21 @@ class DualAssembly(TrajOptBase):
         left_hand = self._x[0:self.state_dim]
         right_hand = self._x[self.state_dim: 2 * self.state_dim]
         beam_poses = self._x[self._no_hands * self.state_dim: ].view(-1, self.state_dim)
+        # Update the pregrasp poses
+        c_target = beam_poses.clone() 
+        no_beams = beam_poses.shape[0] // self.state_dim
+        z_offset = 0.08
+        for k in range(no_beams):
+            c_target[k * self.state_dim + 2] += z_offset
+        
         # Calculate losses
         beam_losses = self._beam_loss(beam_poses, self.goal.view(-1, self.state_dim))
         # Hand losses
-        self.left_loss = self._hand_loss(beam_poses, left_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
-        self.right_loss = self._hand_loss(beam_poses, right_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
+        left_beam_loss = self._hand_loss(beam_poses, left_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
+        right_beam_loss = self._hand_loss(beam_poses, right_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
+        
+        left_pregrasp_loss = self._hand_loss(self.c, left_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
+        right_pregrasp_loss = self._hand_loss(self.c, right_hand.repeat(beam_poses.shape[0], 1)).sum(dim=1)
         
         # Calculate gradients
         beam_gradients = grad(outputs=beam_losses, inputs=beam_poses, retain_graph=True)[0]
@@ -167,12 +273,25 @@ class DualAssembly(TrajOptBase):
         # Check if any of the goals have converged
         self.check_convergence(beam_gradients)        
         
-        # Use loss to calculate contacts
-        left_contacts = (self.left_loss < tol).type(torch.float32)
-        right_contacts = (self.right_loss < tol).type(torch.float32)
+        # Use loss to calculate beam contacts
+        left_contacts = (left_beam_loss < tol).type(torch.float32)
+        right_contacts = (right_beam_loss < tol).type(torch.float32)
+        
+        # Pregrasp contacts
+        left_pregrasp_c = (left_pregrasp_loss < tol).type(torch.float32)
+        right_pregrasp_c = (right_pregrasp_loss < tol).type(torch.float32)
+        
+        self.left_loss = left_beam_loss * (left_contacts) + left_pregrasp_loss * (1 - left_contacts)
+        self.right_loss = right_beam_loss * (right_contacts) + right_pregrasp_loss * (1 - right_contacts)
         
         self.left_loss[pin_indices] *= 10.0
         self.right_loss[pin_indices] *= 10.0
+        
+        # Find pregrasp losses
+        c_loss = self._hand_loss(self.c, c_target).sum(dim=1) * (1 - left_pregrasp_c) + self.left_loss * left_pregrasp_c \
+                        + self._hand_loss(self.c, c_target).sum(dim=1) * (1 - right_pregrasp_c) + self.right_loss * right_pregrasp_c
+        
+        c_grad = grad(outputs=c_loss, inputs=self.c, retain_graph=True)[0]
         
         left_start_loss = self._hand_loss(beam_poses, self.left_start.repeat(beam_poses.shape[0], 1)).sum(dim=1)
         right_start_loss = self._hand_loss(beam_poses, self.right_start.repeat(beam_poses.shape[0], 1)).sum(dim=1)
@@ -198,7 +317,7 @@ class DualAssembly(TrajOptBase):
         left_gradients = grad(self.left_loss[self._left_index], inputs=left_hand, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + beam_gradients[self._left_index, :]
         right_gradients = grad(self.right_loss[self._right_index], inputs=right_hand, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + beam_gradients[self._right_index, :]
         
-        return torch.cat([left_gradients, right_gradients, beam_gradients.view(-1)], dim=0), beam_losses
+        return torch.cat([left_gradients, right_gradients, beam_gradients.view(-1), c_grad.view(-1)], dim=0), beam_losses
     
     def check_convergence(self, gradient):
         
@@ -243,5 +362,8 @@ class DualAssembly(TrajOptBase):
         
     
     def set_x(self, left_hand, right_hand, beams):
-        self._x = torch.cat([left_hand, right_hand, beams], dim=0)
+        self.c.view(-1, self.state_dim)[:, 0:2] = beams.view(-1, self.state_dim)[:, 0:2]
+        self.c.view(-1, self.state_dim)[:, 3:] = beams.view(-1, self.state_dim)[:, 3:]
+        
+        self._x = torch.cat([left_hand, right_hand, beams, self.c], dim=0)
         return 

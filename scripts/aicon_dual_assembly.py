@@ -16,7 +16,7 @@ from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGra
 from beam_data_gen.models.datasets.process_data import ProcessData
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 from beam_data_gen.simulator.sim_robot import SimRobot
-from beam_data_gen.traj_opt.dual_assembly import DualAssembly, TrajOptParams
+from beam_data_gen.traj_opt.dual_assembly import DualAssembly, TrajOptParams, StateParams, DualArmStates
 
 
 def graph_to_pose(graph: RampGraph, node_names: List[str], data_processor: ProcessData):
@@ -79,20 +79,35 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
     
-    params = TrajOptParams(step_size=0.01,
+    params = TrajOptParams(step_size=0.1,
                             no_steps=100,
                             epsilon=1.e-2,
-                            no_particles=30, 
+                            no_particles=1, 
                             device=device)
     
-    traj_opt = DualAssembly(params, state_dim=process_data.state_dim, sim=sim,
+    state_params = StateParams(state_dim=5,
+                                no_beams=no_nodes,
+                                no_hands=2,
+                                device=device,
+                                tol=1.0e-3)
+    
+    traj_opt = DualAssembly(params, 
+                            state_params=state_params, 
+                            sim=sim,
                             left_start=left_pose.clone(),
                             right_start=right_pose.clone(),
                             model=m, data=d)
     
     # Set the values
-    traj_opt.set_x(left_pose, right_pose, pose_init_torch)
-    traj_opt.goal = pose_tar_torch
+    states = DualArmStates(state_params)
+    states.beam_poses = pose_init_torch
+    states.left_pose = left_pose
+    states.right_pose = right_pose
+    states.beam_goal = pose_tar_torch
+    states.initialise()
+    
+    # Set the states
+    traj_opt.states = states
     
     # Optimise
     particles = traj_opt.optimise()

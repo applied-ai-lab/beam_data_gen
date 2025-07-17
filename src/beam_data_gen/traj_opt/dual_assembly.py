@@ -57,6 +57,10 @@ class DualArmStates:
         self.left_pose = torch.zeros(self.params.state_dim).requires_grad_(True).to(self.params.device)
         self.right_pose = torch.zeros(self.params.state_dim).requires_grad_(True).to(self.params.device)
         
+        # Hand start poses
+        self.left_start = torch.zeros(self.params.state_dim).requires_grad_(True).to(self.params.device)
+        self.right_start = torch.zeros(self.params.state_dim).requires_grad_(True).to(self.params.device)
+        
         # Beam poses
         self._beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).requires_grad_(True).to(self.params.device)
         
@@ -184,6 +188,8 @@ class HandLossesContacts(LossesContacts):
         self._beam_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._beam_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         
+        self._start_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        
         # Beam target losses
         self._beam_conver_loss = torch.zeros(self.params.no_beams).to(self.params.device)
         self._beam_conver_p = torch.zeros(self.params.no_beams).to(self.params.device)
@@ -200,7 +206,12 @@ class HandLossesContacts(LossesContacts):
         self._beam_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
                                             states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
         self._beam_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1) 
+                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        
+        self._start_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+                                            states.left_start.repeat(self.params.no_beams, 1)).sum(dim=1)
+        self._start_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+                                            states.right_start.repeat(self.params.no_beams, 1)).sum(dim=1)
         
         # Check which means are at target locations
         self._beam_conver_loss = self._mse_none(states.beam_poses, states.beam_goal).sum(1)
@@ -443,8 +454,8 @@ class DualAssembly(TrajOptBase):
         
         indices = list(range(self._state_params.no_beams))
         
-        active_left_loss = left_loss.clone()
-        active_right_loss = right_loss.clone()
+        active_left_loss = left_loss.clone() + self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
+        active_right_loss = right_loss.clone() + self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
         
         # Pin penalties
         pin_indices = list(2 * k + 1 for k in range(self._state_params.no_pins))

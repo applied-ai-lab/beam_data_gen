@@ -104,6 +104,8 @@ def main():
     states.beam_poses = pose_init_torch
     states.left_pose = left_pose
     states.right_pose = right_pose
+    states.left_start=left_pose.clone()
+    states.right_start=right_pose.clone()
     states.beam_goal = pose_tar_torch
     states.initialise()
     

@@ -450,10 +450,7 @@ class DualAssembly(TrajOptBase):
         
         self._left_index = torch.argmin(active_left_loss, 0)
         self._right_index = torch.argmin(active_right_loss, 0)
-        
-        print(f' Indices: {indices}')
-        print(f' Left index: {self._left_index} and Right index: {self._right_index}')        
-        
+
         # Figure out what to do if a beam is equi-distant
         if self._right_index == self._left_index:
             active_right_loss[self._right_index] *= 1.e3

@@ -147,10 +147,10 @@ class DualArmGradients:
         self.right_pose = torch.zeros(self.params.state_dim).to(self.params.device)
         
         # Beam poses
-        self.beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        self.beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
         
         # Pregrasp locations
-        self.pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        self.pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
         
     def zero(self):
         self.left_pose *= 0.
@@ -406,9 +406,6 @@ class DualAssembly(TrajOptBase):
             print(" Converged ")
             return self._gradients
         
-        # Calculate the gradients for the pregrasp pose
-        self._gradients.pregrasp = grad(outputs=self._pregrasp_losses.pregrasp_loss, inputs=self._states.pregrasp)[0]
-        
         self._gradients.beam_poses = (self._gradients.beam_poses * self._hand_losses._beam_con[0:self._state_params.no_beams].reshape(self._gradients.beam_poses.shape[0], 1) + \
                                         self._gradients.beam_poses * self._hand_losses._beam_con[self._state_params.no_beams:2*self._state_params.no_beams].reshape(self._gradients.beam_poses.shape[0], 1))
         # Apply noises
@@ -424,9 +421,19 @@ class DualAssembly(TrajOptBase):
         self._gradients.right_pose = grad(self.right_loss[self._right_index], inputs=self.states.right_pose, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + \
                                     self._gradients.beam_poses[self._right_index, :]
         
-        # Move pregrasp with hands if in contact
-        self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index] 
-        self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index] 
+        # Calculate the gradients for the pregrasp pose
+        self._gradients.pregrasp = grad(outputs=self._pregrasp_losses.pregrasp_loss, inputs=self._states.pregrasp)[0]
+        
+        # If beam has converged
+        if self._hand_losses._beam_conver_p[self._left_index] > 0.5:
+            self._gradients.left_pose = self._gradients.pregrasp[self._left_index, :]
+        else:
+            self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index]
+        
+        if self._hand_losses._beam_conver_p[self._right_index] > 0.5:            
+            self._gradients.right_pose = self._gradients.pregrasp[self._right_index, :]
+        else:
+            self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index] 
         
         return self._gradients
     
@@ -438,7 +445,7 @@ class DualAssembly(TrajOptBase):
         active_right_loss = right_loss.clone()
         
         for k in range(self._state_params.no_beams):
-            if beam_conv_p[k] > 0.5:
+            if beam_conv_p[k] > 0.5 and pregrasp_conv_p[k] > 0.5:
                 
                 self._convergence[k] = True
                 # Remove the index

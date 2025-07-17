@@ -57,19 +57,19 @@ class DualArmStates:
         self.right_pose = torch.zeros(self.params.state_dim).requires_grad_(True).to(self.params.device)
         
         # Beam poses
-        self.beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).requires_grad_(True).to(self.params.device)
+        self.beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).requires_grad_(True).to(self.params.device)
         
         # Beam goals
-        self.beam_goal = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        self.beam_goal = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
         
         # Pregrasp locations
-        self.pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).requires_grad_(True).to(self.params.device)
+        self.pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).requires_grad_(True).to(self.params.device)
         
         # Pregrasp goals
-        self._pregrasp_goal = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
+        self._pregrasp_goal = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
 
         self.offset = torch.tensor([0, 0, 0.08, 0, 0], dtype=torch.float32)
-        self.grasp_offset = self.offset.repeat(self.params.no_beams).to(self.params.device)
+        self.grasp_offset = self.offset.repeat(self.params.no_beams).view(-1, self.params.state_dim).to(self.params.device)
         
     def initialise(self):
         with torch.no_grad():
@@ -217,7 +217,8 @@ class DualAssembly(TrajOptBase):
         self._left_index = -1
         self._right_index = -1
         
-        self.node_names = list(self.sim._geom_to_name.values())
+        if sim is not None:
+            self.node_names = list(self.sim._geom_to_name.values())
         
         self.left_loss = None
         self.right_loss = None
@@ -327,13 +328,6 @@ class DualAssembly(TrajOptBase):
         
         left_pregrasp_c = self._hand_losses._pregrasp_con[0:self._state_params.no_beams]
         right_pregrasp_c = self._hand_losses._pregrasp_con[self._state_params.no_beams:2 * self._state_params.no_beams]
-        
-        # Reshape the beam poses
-        self.states.beam_poses = self.states.beam_poses.view(-1, self.state_dim)
-        self.states.beam_goal = self.states.beam_goal.view(-1, self.state_dim)
-        
-        self.states.pregrasp = self.states.pregrasp.view(-1, self.state_dim) 
-        self.states.pregrasp_goal = self.states.pregrasp_goal.view(-1, self.state_dim) 
         
         self._beam_losses.calc_losses(self._states)
         self._pregrasp_losses.calc_losses(self._states)

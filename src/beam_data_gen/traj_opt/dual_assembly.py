@@ -282,16 +282,16 @@ class DualAssembly(TrajOptBase):
         self.right_start = right_start
         
         # Noise weights 
-        self.w = torch.tensor([0.1, 0.1, 0.1, 0.2, 0.2], dtype=torch.float32).to(self.params.device)
+        self.w = 0.0 * torch.tensor([0.01, 0.01, 0.01, 0.2, 0.2], dtype=torch.float32).to(self.params.device)
         
         # Convergence dict
         self._convergence = {}
         
-        # Quantities
-        self._no_hands = 2
-        # Losses
-        self._beam_loss = nn.MSELoss(reduction="sum")
-        self._hand_loss = nn.MSELoss(reduction='none')  
+        # # Quantities
+        # self._no_hands = 2
+        # # Losses
+        # self._beam_loss = nn.MSELoss(reduction="sum")
+        # self._hand_loss = nn.MSELoss(reduction='none')  
         
         # Mujoco pointers
         self._mu_model = model
@@ -329,8 +329,12 @@ class DualAssembly(TrajOptBase):
             self.initialise(self.states)
         else:
             self.reset()
+            
+        # Set the initial particles to the states
+        for i in range(self._params.no_particles):
+            self._particle_trajectories.particles[i, 0, :] = self._x
         
-        for k in trange(self._params.no_steps):
+        for k in trange(1, self._params.no_steps, 1):
             for n in range(self._params.no_particles):
                 
                 self._states.advance()
@@ -349,13 +353,16 @@ class DualAssembly(TrajOptBase):
                 self._particle_trajectories.loss[n, k] = self._beam_losses._beam_losses.sum()
                 
                 # Apply noise to gradients
-                self._x = torch.cat([self._states.left_pose.reshape(-1), self._states.right_pose.reshape(-1), self._states.beam_poses.reshape(-1)], dim=0)
+                self._x = torch.cat([self._states.left_pose.reshape(-1), 
+                                    self._states.right_pose.reshape(-1), 
+                                    self._states.beam_poses.reshape(-1),
+                                    self._states.pregrasp.reshape(-1)], dim=0)
                 
-                self._x = self.normalise_pose(self._x)
+                self._x[0:(self._state_params.no_beams + self._state_params.no_hands) * self.state_dim] = self.normalise_pose(self._x[0:(self._state_params.no_beams + self._state_params.no_hands) * self.state_dim])
                 self._particle_trajectories.particles[n, k, :] = self._x
                 
                 # Check collisions
-                self.sim.decode_x(self._mu_data, self._x.unsqueeze(0))
+                self.sim.decode_x(self._mu_data, self._x[0:(self._state_params.no_hands + self._state_params.no_beams) * self.state_dim].unsqueeze(0))
                 mujoco.mj_step(self._mu_model, self._mu_data)
                 
                 # Check for collisions with moving beams
@@ -488,5 +495,8 @@ class DualAssembly(TrajOptBase):
     def states(self, state_values: DualArmStates):
         self._states = state_values
         # Update x
-        self._x = torch.cat([state_values.left_pose.reshape(-1), state_values.right_pose.reshape(-1), state_values.beam_poses.reshape(-1)], dim=0)
+        self._x = torch.cat([state_values.left_pose.reshape(-1), 
+                            state_values.right_pose.reshape(-1), 
+                            state_values.beam_poses.reshape(-1), 
+                            state_values.pregrasp.reshape(-1)], dim=0)
         return

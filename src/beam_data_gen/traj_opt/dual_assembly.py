@@ -40,10 +40,11 @@ class ParticleTrajectories:
         return particles
     
 class StateParams:
-    def __init__(self, state_dim:int, no_beams:int, no_hands:int, device:torch.device, tol: float):
+    def __init__(self, state_dim:int, no_beams:int, no_hands:int, no_pins:int, device:torch.device, tol: float):
         self.device = device
         self.no_hands = no_hands
         self.no_beams = no_beams
+        self.no_pins = no_pins
         self.state_dim = state_dim
         self.tol = tol
 
@@ -287,12 +288,6 @@ class DualAssembly(TrajOptBase):
         # Convergence dict
         self._convergence = {}
         
-        # # Quantities
-        # self._no_hands = 2
-        # # Losses
-        # self._beam_loss = nn.MSELoss(reduction="sum")
-        # self._hand_loss = nn.MSELoss(reduction='none')  
-        
         # Mujoco pointers
         self._mu_model = model
         self._mu_data = data
@@ -403,7 +398,7 @@ class DualAssembly(TrajOptBase):
                             
         self.right_loss = self._hand_losses._beam_loss[self._state_params.no_beams:2*self._state_params.no_beams] * (right_pregrasp_c)  + \
                             self._hand_losses._pregrasp_loss[self._state_params.no_beams: 2*self._state_params.no_beams] * (1 - right_pregrasp_c)
-                            
+
         # If converged return zeros for gradients
         if self.check_convergence(self._hand_losses._beam_conver_p,
                                 self._hand_losses._pregrasp_conver_p, 
@@ -450,6 +445,12 @@ class DualAssembly(TrajOptBase):
         
         active_left_loss = left_loss.clone()
         active_right_loss = right_loss.clone()
+        
+        # Pin penalties
+        pin_indices = list(2 * k + 1 for k in range(self._state_params.no_pins))
+        
+        active_left_loss[pin_indices] *= 10.0
+        active_right_loss[pin_indices] *= 10.0
         
         for k in range(self._state_params.no_beams):
             if beam_conv_p[k] > 0.5 and pregrasp_conv_p[k] > 0.5:

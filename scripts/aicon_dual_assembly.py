@@ -88,6 +88,7 @@ def main():
     state_params = StateParams(state_dim=5,
                                 no_beams=no_nodes,
                                 no_hands=2,
+                                no_pins=4,
                                 device=device,
                                 tol=1.0e-4)
     

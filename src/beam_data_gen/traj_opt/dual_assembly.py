@@ -57,13 +57,13 @@ class DualArmStates:
         self.right_pose = torch.zeros(self.params.state_dim).requires_grad_(True).to(self.params.device)
         
         # Beam poses
-        self.beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).requires_grad_(True).to(self.params.device)
+        self._beam_poses = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).requires_grad_(True).to(self.params.device)
         
         # Beam goals
-        self.beam_goal = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
+        self._beam_goal = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
         
         # Pregrasp locations
-        self.pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).requires_grad_(True).to(self.params.device)
+        self._pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).requires_grad_(True).to(self.params.device)
         
         # Pregrasp goals
         self._pregrasp_goal = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
@@ -99,6 +99,34 @@ class DualArmStates:
         self.pregrasp.detach()
         return
     
+    # Beam Poses setters and getters
+    @property
+    def beam_poses(self):
+        return self._beam_poses
+    
+    @beam_poses.setter
+    def beam_poses(self, value):
+        self._beam_poses = value.view(-1, self.params.state_dim)
+    
+    # Beam Goals setters and getters
+    @property
+    def beam_goal(self):
+        return self._beam_goal
+    
+    @beam_goal.setter
+    def beam_goal(self, value):
+        self._beam_goal = value.view(-1, self.params.state_dim)
+    
+    # Pregrasp Poses setters and getters
+    @property
+    def pregrasp(self):
+        return self._pregrasp
+    
+    @pregrasp.setter
+    def pregrasp(self, value):
+        self._pregrasp = value.view(-1, self.params.state_dim)        
+    
+    # Pregrasp Goal setters and getters
     @property
     def pregrasp_goal(self):
         self._pregrasp_goal = self.beam_poses.view(self._pregrasp_goal.shape) + self.grasp_offset.view(self._pregrasp_goal.shape)
@@ -106,7 +134,7 @@ class DualArmStates:
     
     @pregrasp_goal.setter
     def pregrasp_goal(self, value):
-        self._pregrasp_goal = value
+        self._pregrasp_goal = value.view(-1, self.params.state_dim)
         return
     
 
@@ -123,7 +151,13 @@ class DualArmGradients:
         
         # Pregrasp locations
         self.pregrasp = torch.zeros(self.params.no_beams * self.params.state_dim).to(self.params.device)
-
+        
+    def zero(self):
+        self.left_pose *= 0.
+        self.right_pose *= 0.
+        self.beam_poses *= 0.
+        self.pregrasp *= 0.
+        return
 
 class LossesContacts:
     def __init__(self, params: StateParams):
@@ -149,6 +183,13 @@ class HandLossesContacts(LossesContacts):
         self._beam_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._beam_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         
+        # Beam target losses
+        self._beam_conver_loss = torch.zeros(self.params.no_beams).to(self.params.device)
+        self._beam_conver_p = torch.zeros(self.params.no_beams).to(self.params.device)
+        # Pregrasp target losses
+        self._pregrasp_conver_loss = torch.zeros(self.params.no_beams).to(self.params.device)
+        self._pregrasp_conver_p = torch.zeros(self.params.no_beams).to(self.params.device)
+        
     def calc_losses(self, states: DualArmStates):
         self._pregrasp_loss[0:self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1), 
                                             states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
@@ -158,12 +199,26 @@ class HandLossesContacts(LossesContacts):
         self._beam_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
                                             states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
         self._beam_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)        
+                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1) 
+        
+        # Check which means are at target locations
+        self._beam_conver_loss = self._mse_none(states.beam_poses, states.beam_goal).sum(1)
+        self._pregrasp_conver_loss = self._mse_none(states.pregrasp, states.pregrasp_goal).sum(1)
         return
     
     def calc_prob(self):
         self._pregrasp_con = (self._pregrasp_loss < self.params.tol).type(torch.float32)
-        self._beam_con = (self._beam_loss < self.params.tol).type(torch.float32)        
+        # Which beams are in contact with the 
+        self._beam_con = (self._beam_loss < self.params.tol).type(torch.float32)  
+        # Check which beams are converged 
+        self._beam_conver_p = (self._beam_conver_loss < self.params.tol).type(torch.float32)
+        self._pregrasp_conver_p = (self._pregrasp_conver_loss < self.params.tol).type(torch.float32)
+        
+        # Check if the beams have converged
+        for k in range(self.params.no_beams):
+            # If converged hand is not in contact
+            if self._beam_conver_p[k] > 0.5:
+                self._beam_con[k] = 0.0
         return
     
     
@@ -279,6 +334,7 @@ class DualAssembly(TrajOptBase):
             for n in range(self._params.no_particles):
                 
                 self._states.advance()
+                self._states.requires_grad()
             
                 gradients = self.gradients()
                 
@@ -341,17 +397,14 @@ class DualAssembly(TrajOptBase):
         self.right_loss = self._hand_losses._beam_loss[self._state_params.no_beams:2*self._state_params.no_beams] * (right_pregrasp_c)  + \
                             self._hand_losses._pregrasp_loss[self._state_params.no_beams: 2*self._state_params.no_beams] * (1 - right_pregrasp_c)
                             
-        # Check if any of the goals have converged
-        self.check_convergence(self._gradients.beam_poses)
-        
-        # Find smallest indices
-        self._left_index = torch.argmin(self.left_loss, 0)
-        self._right_index = torch.argmin(self.right_loss, 0)
-        
-        # Figure out what to do if a beam is equi-distant
-        if self._right_index == self._left_index:
-            self.right_loss[self._right_index] = 1.0e3
-            self._right_index = torch.argmin(self.right_loss, 0)
+        # If converged return zeros for gradients
+        if self.check_convergence(self._hand_losses._beam_conver_p,
+                                self._hand_losses._pregrasp_conver_p, 
+                                self.left_loss,
+                                self.right_loss):
+            self._gradients.zero()
+            print(" Converged ")
+            return self._gradients
         
         # Calculate the gradients for the pregrasp pose
         self._gradients.pregrasp = grad(outputs=self._pregrasp_losses.pregrasp_loss, inputs=self._states.pregrasp)[0]
@@ -366,8 +419,10 @@ class DualAssembly(TrajOptBase):
         self._gradients.beam_poses[:, 3:5] *= 2.0
         
         # Hand gradients
-        self._gradients.left_pose = grad(self.left_loss[self._left_index], inputs=self.states.left_pose, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + self._gradients.beam_poses[self._left_index, :]
-        self._gradients.right_pose = grad(self.right_loss[self._right_index], inputs=self.states.right_pose, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + self._gradients.beam_poses[self._right_index, :]
+        self._gradients.left_pose = grad(self.left_loss[self._left_index], inputs=self.states.left_pose, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + \
+                                    self._gradients.beam_poses[self._left_index, :]
+        self._gradients.right_pose = grad(self.right_loss[self._right_index], inputs=self.states.right_pose, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + \
+                                    self._gradients.beam_poses[self._right_index, :]
         
         # Move pregrasp with hands if in contact
         self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index] 
@@ -375,34 +430,36 @@ class DualAssembly(TrajOptBase):
         
         return self._gradients
     
-    def check_convergence(self, gradient):
+    def check_convergence(self, beam_conv_p, pregrasp_conv_p, left_loss, right_loss):
         
-        grad_norm = torch.norm(gradient, p=2.0, dim=1)
-        # Item with largest gradient
-        index = torch.argmin(grad_norm)
-        min_val = grad_norm[index]
+        indices = list(range(self._state_params.no_beams))
         
-        while min_val < self.params.epsilon:
+        active_left_loss = left_loss.clone()
+        active_right_loss = right_loss.clone()
+        
+        for k in range(self._state_params.no_beams):
+            if beam_conv_p[k] > 0.5:
+                
+                self._convergence[k] = True
+                # Remove the index
+                active_left_loss[k] *= 1.e6
+                active_right_loss[k] *= 1.e6
+                
+        if len(indices) == 0:
+            return True
+        
+        self._left_index = torch.argmin(active_left_loss, 0)
+        self._right_index = torch.argmin(active_right_loss, 0)
+        
+        print(f' Indices: {indices}')
+        print(f' Left index: {self._left_index} and Right index: {self._right_index}')        
+        
+        # Figure out what to do if a beam is equi-distant
+        if self._right_index == self._left_index:
+            active_right_loss[self._right_index] *= 1.e3
+            self._right_index = torch.argmin(active_right_loss, 0)
             
-            self._convergence[index.item()] = True
-            
-            if len(self._convergence.keys()) >= gradient.shape[0]:
-                gradient *= 0.0
-                break
-            
-            gradient[index, :] *= 1.0e6      
-            
-            self.left_loss[index] *= 1.0e6
-            self.right_loss[index] *= 1.0e6
-            
-            # with torch.no_grad():
-            #     self._states.pregrasp[index, 2] = self._states.pregrasp[index, 2] + 0.08
-            
-            grad_norm = torch.norm(gradient, p=2.0, dim=1)
-            index = torch.argmin(grad_norm)
-            min_val = grad_norm[index]           
-            
-        return
+        return False
     
     def normalise_pose(self, pose_torch: torch.tensor):
         no_items = pose_torch.shape[0] // self.state_dim    

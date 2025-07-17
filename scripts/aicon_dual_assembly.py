@@ -80,8 +80,8 @@ def main():
     d = mujoco.MjData(m)
     
     params = TrajOptParams(step_size=0.1,
-                            no_steps=100,
-                            epsilon=1.e-2,
+                            no_steps=300,
+                            epsilon=1.e-3,
                             no_particles=1, 
                             device=device)
     
@@ -89,7 +89,7 @@ def main():
                                 no_beams=no_nodes,
                                 no_hands=2,
                                 device=device,
-                                tol=1.0e-3)
+                                tol=1.0e-4)
     
     traj_opt = DualAssembly(params, 
                             state_params=state_params, 
@@ -117,7 +117,7 @@ def main():
     plt.show()
     
     indices = particles.sample_indices()
-    trajectory = particles.sample_trajectories(indices)
+    trajectory = particles.sample_trajectories(indices)[:, 0:(state_params.no_hands + state_params.no_beams) * state_params.state_dim]
     
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:

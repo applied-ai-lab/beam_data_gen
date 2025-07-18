@@ -401,7 +401,7 @@ class DualAssembly(TrajOptBase):
         self._pregrasp_losses.calc_losses(self._states)
         
         # Calculate beam gradients
-        self._gradients.beam_poses = grad(outputs=self._beam_losses._beam_losses, inputs=self.states.beam_poses)[0]
+        self._gradients.beam_poses = grad(outputs=self._beam_losses._beam_losses, inputs=self.states.beam_poses, retain_graph=True)[0]
         
         self.left_loss = self._hand_losses._beam_loss[0:self._state_params.no_beams] * (left_pregrasp_c)  + \
                             self._hand_losses._pregrasp_loss[0:self._state_params.no_beams] * (1 - left_pregrasp_c)
@@ -434,7 +434,7 @@ class DualAssembly(TrajOptBase):
                                     self._gradients.beam_poses[self._right_index, :]
         
         # Calculate the gradients for the pregrasp pose
-        self._gradients.pregrasp = grad(outputs=self._pregrasp_losses.pregrasp_loss, inputs=self._states.pregrasp)[0]
+        self._gradients.pregrasp = grad(outputs=self._pregrasp_losses.pregrasp_loss, inputs=self._states.pregrasp, retain_graph=True)[0]
         
         # If beam has converged
         if self._hand_losses._beam_conver_p[self._left_index] > 0.5:

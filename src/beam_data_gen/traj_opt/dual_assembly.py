@@ -343,7 +343,6 @@ class DualAssembly(TrajOptBase):
         for k in trange(1, self._params.no_steps, 1):
             for n in range(self._params.no_particles):
                 
-                self._states.advance()
                 self._states.requires_grad()
             
                 gradients = self.gradients()
@@ -506,6 +505,7 @@ class DualAssembly(TrajOptBase):
     @states.setter
     def states(self, state_values: DualArmStates):
         self._states = state_values
+        self._states.advance()
         # Update x
         self._x = torch.cat([state_values.left_pose.reshape(-1), 
                             state_values.right_pose.reshape(-1), 

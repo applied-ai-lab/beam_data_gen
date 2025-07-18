@@ -324,7 +324,7 @@ class DualAssembly(TrajOptBase):
         self._particle_trajectories.indices.zero_()
         self._particle_trajectories.no_live_particles.zero_()
         self._particle_trajectories.loss.zero_()
-        self._weights.zero_()
+        self._weights *= 0.0
         return
         
     

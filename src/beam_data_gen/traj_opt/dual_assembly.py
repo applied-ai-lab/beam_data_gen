@@ -16,6 +16,7 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 class ParticleTrajectories:
     def __init__(self):
         self.particles: torch.Tensor 
+        self.gripper_particles: torch.Tensor
         self.indices: torch.Tensor
         self.no_live_particles = torch.Tensor
         self.loss = torch.Tensor
@@ -35,9 +36,11 @@ class ParticleTrajectories:
     def sample_trajectories(self, indices) -> torch.Tensor:
         _, time_steps, no_features = self.particles.shape
         particles = torch.zeros([time_steps, no_features], dtype=self.particles.dtype).to(self.particles.device)
+        gripper = torch.zeros([time_steps, self.gripper_particles.shape[2]], dtype=self.particles.dtype).to(self.particles.device)
         for k, idx in enumerate(indices):
             particles[k, :] = self.particles[idx, k, :]
-        return particles
+            gripper[k, :] = self.gripper_particles[idx, k, :]
+        return particles, gripper
     
 class StateParams:
     def __init__(self, state_dim:int, no_beams:int, no_hands:int, no_pins:int, device:torch.device, tol: float):
@@ -312,6 +315,7 @@ class DualAssembly(TrajOptBase):
         self._particle_trajectories = ParticleTrajectories()
         # Allocate container
         self._particle_trajectories.particles = torch.zeros([self.params.no_particles, self.params.no_steps, self._x.shape[0]], dtype=torch.float32).to(self._x.device)
+        self._particle_trajectories.gripper_particles = torch.zeros([self.params.no_particles, self.params.no_steps, self._state_params.no_hands], dtype=torch.float32).to(self._x.device)
         self._particle_trajectories.indices = torch.zeros([self.params.no_steps, self.params.no_particles], dtype=torch.int32)
         self._particle_trajectories.no_live_particles = torch.zeros([self.params.no_steps], dtype=torch.int32)
         self._particle_trajectories.loss = torch.zeros([self.params.no_particles, self.params.no_steps], dtype=torch.float32)
@@ -340,7 +344,7 @@ class DualAssembly(TrajOptBase):
         for i in range(self._params.no_particles):
             self._particle_trajectories.particles[i, 0, :] = self._x
         
-        for k in trange(1, self._params.no_steps, 1):
+        for k in range(1, self._params.no_steps, 1):
             for n in range(self._params.no_particles):
                 
                 self._states.requires_grad()
@@ -365,6 +369,10 @@ class DualAssembly(TrajOptBase):
                 
                 self._x[0:(self._state_params.no_beams + self._state_params.no_hands) * self.state_dim] = self.normalise_pose(self._x[0:(self._state_params.no_beams + self._state_params.no_hands) * self.state_dim])
                 self._particle_trajectories.particles[n, k, :] = self._x
+                # Gripper state
+                self._particle_trajectories.gripper_particles[n, k, 0] = (self._hand_losses._beam_con[0:self._state_params.no_beams] > 0.5).any().type(torch.float32)
+                self._particle_trajectories.gripper_particles[n, k, 1] = (self._hand_losses._beam_con[self._state_params.no_beams: 2 * self._state_params.no_beams] > 0.5).any().type(torch.float32)
+
                 
                 # Check collisions
                 self.sim.decode_x(self._mu_data, self._x[0:(self._state_params.no_hands + self._state_params.no_beams) * self.state_dim].unsqueeze(0))
@@ -382,7 +390,8 @@ class DualAssembly(TrajOptBase):
             
             indices = systematic_resample(self._weights)
             self._particle_trajectories.particles[:, k, :] = self._particle_trajectories.particles[indices, k, :]
-            self._particle_trajectories.indices[k] = torch.tensor(indices)
+            self._particle_trajectories.gripper_particles[:, k, :] = self._particle_trajectories.gripper_particles[indices, k, :]
+            self._particle_trajectories.indices[k] = torch.tensor(indices)                
         
         return self._particle_trajectories
     

@@ -434,7 +434,7 @@ class DualAssembly(TrajOptBase):
         self._gradients.beam_poses += min(torch.norm(self._gradients.beam_poses, p=2.0), 1.0) * noise * self.w
         self._gradients.beam_poses = (self._gradients.beam_poses * left_contacts.reshape(self._gradients.beam_poses.shape[0], 1) + self._gradients.beam_poses * right_contacts.reshape(self._gradients.beam_poses.shape[0], 1))
         
-        self._gradients.beam_poses[:, 3:5] *= 2.0
+        self._gradients.beam_poses[:, 3:5] *= 1.5
         
         # Hand gradients
         self._gradients.left_pose = grad(self.left_loss[self._left_index], inputs=self.states.left_pose, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + \
@@ -462,8 +462,8 @@ class DualAssembly(TrajOptBase):
         
         indices = list(range(self._state_params.no_beams))
         
-        active_left_loss = left_loss.clone() + self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
-        active_right_loss = right_loss.clone() + self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
+        active_left_loss = self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
+        active_right_loss = self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
         
         # Pin penalties
         pin_indices = list(2 * k + 1 for k in range(self._state_params.no_pins))

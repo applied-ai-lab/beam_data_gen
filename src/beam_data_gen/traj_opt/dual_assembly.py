@@ -459,36 +459,35 @@ class DualAssembly(TrajOptBase):
         return self._gradients
     
     def check_convergence(self, beam_conv_p, pregrasp_conv_p, left_loss, right_loss):
-        
-        indices = list(range(self._state_params.no_beams))
-        
-        active_left_loss = self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
-        active_right_loss = self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
+                
+        self.active_left_loss = self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
+        self.active_right_loss = self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
         
         # Pin penalties
         pin_indices = list(2 * k + 1 for k in range(self._state_params.no_pins))
         
-        active_left_loss[pin_indices] *= 10.0
-        active_right_loss[pin_indices] *= 10.0
+        self.active_left_loss[pin_indices] *= 10.0
+        self.active_right_loss[pin_indices] *= 10.0
         
         for k in range(self._state_params.no_beams):
             if beam_conv_p[k] > 0.5 and pregrasp_conv_p[k] > 0.5:
                 
                 self._convergence[k] = True
                 # Remove the index
-                active_left_loss[k] *= 1.e6
-                active_right_loss[k] *= 1.e6
+                self.active_left_loss[k] *= 1.e6
+                self.active_right_loss[k] *= 1.e6
                 
-        if len(indices) == 0:
+        if len(self._convergence.keys()) == self._state_params.no_beams:
             return True
         
-        self._left_index = torch.argmin(active_left_loss, 0)
-        self._right_index = torch.argmin(active_right_loss, 0)
+        self._left_index = torch.argmin(self.active_left_loss, 0)
+        self._right_index = torch.argmin(self.active_right_loss, 0)
 
         # Figure out what to do if a beam is equi-distant
-        if self._right_index == self._left_index:
-            active_right_loss[self._right_index] *= 1.e3
-            self._right_index = torch.argmin(active_right_loss, 0)
+        while self._right_index == self._left_index:
+                        
+            self.active_right_loss[self._right_index] *= 1.e3
+            self._right_index = torch.argmin(self.active_right_loss, 0)
             
         return False
     

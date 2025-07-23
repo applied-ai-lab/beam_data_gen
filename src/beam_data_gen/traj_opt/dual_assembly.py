@@ -233,7 +233,9 @@ class HandLossesContacts(LossesContacts):
         for k in range(self.params.no_beams):
             # If converged hand is not in contact
             if self._beam_conver_p[k] > 0.5:
+                print( f" Release hand for beam {k} " )
                 self._beam_con[k] = 0.0
+                self._beam_con[self.params.no_beams + k] = 0.0
         return
     
     

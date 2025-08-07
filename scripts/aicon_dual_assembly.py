@@ -120,7 +120,8 @@ def main():
     plt.show()
     
     indices = particles.sample_indices()
-    trajectory = particles.sample_trajectories(indices)[:, 0:(state_params.no_hands + state_params.no_beams) * state_params.state_dim]
+    trajectory, gripper_states = particles.sample_trajectories(indices)
+    trajectory = trajectory[:, 0:(state_params.no_hands + state_params.no_beams) * state_params.state_dim]
     
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:

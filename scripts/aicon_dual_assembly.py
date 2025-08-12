@@ -38,8 +38,8 @@ def main():
     # Data processor
     process_data = ProcessData(np.array([1.0, 1.0, 1.0]))  
     # Hands
-    left_pose = torch.tensor([0.15, 0.55, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
-    right_pose = torch.tensor([0.00, 0.00, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
+    left_pose = torch.tensor([0.15, 0.25, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
+    right_pose = torch.tensor([0.00, -0.25, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
     
     # Node names for consideration
     node_names = ["square_beam_1",

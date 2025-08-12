@@ -8,6 +8,7 @@ import mujoco
 from filterpy.monte_carlo import systematic_resample
 from tqdm import trange
 import mujoco
+from scipy.spatial.transform import Rotation as R
 
 from beam_data_gen.traj_opt.traj_opt_base import (TrajOptParams, TrajOptBase)
 from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
@@ -106,6 +107,21 @@ class DualArmStates:
         self.beam_poses.detach()
         self.pregrasp.detach()
         return
+    
+    # Helper funcs
+    def pose_quat_to_state(self, pose_quat_xyzw: np.array):
+        rows, _ = pose_quat_xyzw.shape
+        state = torch.zeros((rows, self.params.state_dim), dtype=torch.float32).to(self.params.device)
+        
+        for k in range(rows):
+            state[k, 0:3] = pose_quat_xyzw[k, 0:3]
+            
+            rot = R.from_quat(pose_quat_xyzw[k, 3:])
+            
+            state[k, 3] = torch.sin(rot.as_euler(seq="xyz")[2])
+            state[k, 4] = torch.cos(rot.as_euler(seq="xyz")[2])
+            
+        return state
     
     # Beam Poses setters and getters
     @property

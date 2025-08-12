@@ -344,7 +344,7 @@ class DualAssembly(TrajOptBase):
         self._particle_trajectories.no_live_particles = torch.zeros([self.params.no_steps], dtype=torch.int32)
         self._particle_trajectories.loss = torch.zeros([self.params.no_particles, self.params.no_steps], dtype=torch.float32)
         # Weights
-        self._weights = np.zeros([self.params.no_particles])
+        self._weights = np.ones([self.params.no_particles])
         return      
     
     def reset(self):
@@ -352,7 +352,7 @@ class DualAssembly(TrajOptBase):
         self._particle_trajectories.indices.zero_()
         self._particle_trajectories.no_live_particles.zero_()
         self._particle_trajectories.loss.zero_()
-        self._weights *= 0.0
+        self._weights = np.ones([self.params.no_particles])
         return
         
     
@@ -403,8 +403,12 @@ class DualAssembly(TrajOptBase):
                 mujoco.mj_step(self._mu_model, self._mu_data)
                 
                 # Check for collisions with moving beams
-                if self.sim.check_collisions(self._mu_data, self.node_names[self._left_index]) or self.sim.check_collisions(self._mu_data, self.node_names[self._right_index]):
-                    self._weights[n] = 1.0e-5
+                if self._left_index is not None:
+                    if self.sim.check_collisions(self._mu_data, self.node_names[self._left_index]):
+                        self._weights[n] = 1.0e-5
+                elif self._right_index is not None:
+                    if self.sim.check_collisions(self._mu_data, self.node_names[self._right_index]):
+                        self._weights[n] = 1.0e-5
                 else:
                     self._weights[n] = 1.0
                     self._particle_trajectories.no_live_particles[k] += 1
@@ -511,12 +515,20 @@ class DualAssembly(TrajOptBase):
         
         # Check if beams are in the goal location
         for k in range(self._state_params.no_beams):
+            # Check to see if the beam has reached the goal
             if beam_conv_p[k] > 0.5 and pregrasp_conv_p[k] > 0.5:
                 
                 self._convergence[k] = True
+                
+            # Test to see if a beam is still in play
             else:
-                left_dict[k] = self.active_left_loss[k]
-                right_dict[k] = self.active_right_loss[k]
+                # Check left
+                if self._states.beam_poses[k, 1] > -0.0:
+                    left_dict[k] = self.active_left_loss[k]
+                
+                # Check right    
+                if self._states.beam_poses[k, 1] < 0.0:
+                    right_dict[k] = self.active_right_loss[k]
                 
         if len(self._convergence.keys()) == self._state_params.no_beams:
             return True
@@ -528,7 +540,8 @@ class DualAssembly(TrajOptBase):
             self._left_index = list(left_dict.keys())[min_index]
             
             # Remove the left index from the right arm -- at this point, they are the same
-            right_dict.pop(self._left_index)
+            if self._left_index in right_dict.keys():
+                right_dict.pop(self._left_index)
             
         else:            
             self._left_index = None

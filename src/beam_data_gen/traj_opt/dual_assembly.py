@@ -478,8 +478,8 @@ class DualAssembly(TrajOptBase):
     
     def check_convergence(self, beam_conv_p, pregrasp_conv_p, left_loss, right_loss):
                 
-        self.active_left_loss = left_loss.clone() # + self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
-        self.active_right_loss = right_loss.clone() # self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
+        self.active_left_loss = self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
+        self.active_right_loss = self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
         
         # Pin penalties
         pin_indices = list(2 * k + 1 for k in range(self._state_params.no_pins))

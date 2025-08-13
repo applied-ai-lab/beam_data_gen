@@ -529,8 +529,9 @@ class DualAssembly(TrajOptBase):
                 # Check right    
                 if self._states.beam_poses[k, 1] < 0.0:
                     right_dict[k] = self.active_right_loss[k]
-                
-        if len(self._convergence.keys()) == self._state_params.no_beams:
+        
+        # Check if no tasks to do -- converged
+        if len(left_dict.keys()) == 0 and len(right_dict.keys()) == 0:
             return True
         
         if len(left_dict.keys()) > 0:

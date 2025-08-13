@@ -114,12 +114,12 @@ class DualArmStates:
         state = torch.zeros((rows, self.params.state_dim), dtype=torch.float32).to(self.params.device)
         
         for k in range(rows):
-            state[k, 0:3] = pose_quat_xyzw[k, 0:3]
+            state[k, 0:3] = torch.from_numpy(pose_quat_xyzw[k, 0:3])
             
             rot = R.from_quat(pose_quat_xyzw[k, 3:])
             
-            state[k, 3] = torch.sin(rot.as_euler(seq="xyz")[2])
-            state[k, 4] = torch.cos(rot.as_euler(seq="xyz")[2])
+            state[k, 3] = torch.sin(torch.tensor(rot.as_euler(seq="xyz")[2], dtype=torch.float32).to(self.params.device))
+            state[k, 4] = torch.cos(torch.tensor(rot.as_euler(seq="xyz")[2], dtype=torch.float32).to(self.params.device))
             
         return state
     

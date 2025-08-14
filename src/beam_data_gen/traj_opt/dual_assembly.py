@@ -246,7 +246,7 @@ class HandLossesContacts(LossesContacts):
     def calc_prob(self):
         self._pregrasp_con = (self._pregrasp_loss < self.params.tol).type(torch.float32)
         # Which beams are in contact with the 
-        self._beam_con = (self._beam_loss < self.params.tol).type(torch.float32)  
+        self._beam_con = (self._beam_loss < 0.005).type(torch.float32)  
         # Check which beams are converged 
         self._beam_conver_p = (self._beam_conver_loss < self.params.tol).type(torch.float32)
         self._pregrasp_conver_p = (self._pregrasp_conver_loss < self.params.tol).type(torch.float32)
@@ -364,9 +364,16 @@ class DualAssembly(TrajOptBase):
         else:
             self.reset()
             
+        # Calc losses
+        self._hand_losses.calc_losses(self._states)
+        self._hand_losses.calc_prob()
+        
         # Set the initial particles to the states
         for i in range(self._params.no_particles):
             self._particle_trajectories.particles[i, 0, :] = self._x
+
+            self._particle_trajectories.gripper_particles[i, 0, 0] = (self._hand_losses._beam_con[0:self._state_params.no_beams] > 0.5).any().type(torch.float32)
+            self._particle_trajectories.gripper_particles[i, 0, 1] = (self._hand_losses._beam_con[self._state_params.no_beams: 2 * self._state_params.no_beams] > 0.5).any().type(torch.float32)
         
         for k in range(1, self._params.no_steps, 1):
             for n in range(self._params.no_particles):

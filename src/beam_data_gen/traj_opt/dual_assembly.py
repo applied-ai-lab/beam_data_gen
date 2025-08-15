@@ -206,6 +206,8 @@ class HandLossesContacts(LossesContacts):
         
         self._beam_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._beam_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        self._gripper_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        self._gripper_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._beam_loss_none = torch.zeros((self.params.no_hands * self.params.no_beams, self.params.state_dim)).to(self.params.device)
         
         self._start_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
@@ -216,6 +218,15 @@ class HandLossesContacts(LossesContacts):
         # Pregrasp target losses
         self._pregrasp_conver_loss = torch.zeros(self.params.no_beams).to(self.params.device)
         self._pregrasp_conver_p = torch.zeros(self.params.no_beams).to(self.params.device)
+
+    def check_gripper_state(self, states: DualArmStates):
+        self._gripper_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+                                            states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        self._gripper_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        # Check the conditions
+        self._gripper_con = (self._beam_loss < 0.005).type(torch.float32)  
+        return self._gripper_con
         
     def calc_losses(self, states: DualArmStates):
         self._pregrasp_loss[0:self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1), 
@@ -228,10 +239,10 @@ class HandLossesContacts(LossesContacts):
         self._beam_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
                                             states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
         
-        self._beam_loss_none[0:self.params.no_beams, :] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.left_pose.repeat(self.params.no_beams, 1))
-        self._beam_loss_none[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.right_pose.repeat(self.params.no_beams, 1))
+        # self._beam_loss_none[0:self.params.no_beams, :] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+        #                                     states.left_pose.repeat(self.params.no_beams, 1))
+        # self._beam_loss_none[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+        #                                     states.right_pose.repeat(self.params.no_beams, 1))
         
         self._start_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
                                             states.left_start.repeat(self.params.no_beams, 1)).sum(dim=1)
@@ -244,7 +255,7 @@ class HandLossesContacts(LossesContacts):
         return
     
     def calc_prob(self):
-        self._pregrasp_con = (self._pregrasp_loss < self.params.tol).type(torch.float32)
+        self._pregrasp_con = (self._pregrasp_loss < 0.02).type(torch.float32)
         # Which beams are in contact with the 
         self._beam_con = (self._beam_loss < 0.005).type(torch.float32)  
         # Check which beams are converged 
@@ -478,11 +489,11 @@ class DualAssembly(TrajOptBase):
         if self._left_index is not None:            
             # Hand gradients
             self._gradients.left_pose = grad(self.left_loss[self._left_index], inputs=self.states.left_pose, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + \
-                                        self._gradients.beam_poses[self._left_index, :]
+                                        self._gradients.beam_poses[self._left_index, :] * left_contacts[self._left_index]
             
             # If beam has converged
             if self._hand_losses._beam_conver_p[self._left_index] > 0.5:
-                self._gradients.left_pose = self._gradients.pregrasp[self._left_index, :]
+                self._gradients.left_pose = 5.0 * self._gradients.pregrasp[self._left_index, :]
             else:
                 self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index]
         
@@ -492,10 +503,10 @@ class DualAssembly(TrajOptBase):
         # Right gradients
         if self._right_index is not None:
             self._gradients.right_pose = grad(self.right_loss[self._right_index], inputs=self.states.right_pose, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + \
-                                        self._gradients.beam_poses[self._right_index, :]
+                                        self._gradients.beam_poses[self._right_index, :] * right_contacts[self._right_index]
             
             if self._hand_losses._beam_conver_p[self._right_index] > 0.5:            
-                self._gradients.right_pose = self._gradients.pregrasp[self._right_index, :]
+                self._gradients.right_pose = 5.0 * self._gradients.pregrasp[self._right_index, :]
             else:
                 self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index] 
                 

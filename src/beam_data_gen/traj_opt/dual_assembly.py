@@ -493,7 +493,7 @@ class DualAssembly(TrajOptBase):
             
             # If beam has converged
             if self._hand_losses._beam_conver_p[self._left_index] > 0.5:
-                self._gradients.left_pose = 5.0 * self._gradients.pregrasp[self._left_index, :]
+                self._gradients.left_pose = self._gradients.pregrasp[self._left_index, :]
             else:
                 self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index]
         
@@ -506,7 +506,7 @@ class DualAssembly(TrajOptBase):
                                         self._gradients.beam_poses[self._right_index, :] * right_contacts[self._right_index]
             
             if self._hand_losses._beam_conver_p[self._right_index] > 0.5:            
-                self._gradients.right_pose = 5.0 * self._gradients.pregrasp[self._right_index, :]
+                self._gradients.right_pose = self._gradients.pregrasp[self._right_index, :]
             else:
                 self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index] 
                 

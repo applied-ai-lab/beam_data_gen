@@ -383,8 +383,17 @@ class DualAssembly(TrajOptBase):
         for i in range(self._params.no_particles):
             self._particle_trajectories.particles[i, 0, :] = self._x
 
-            self._particle_trajectories.gripper_particles[i, 0, 0] = (self._hand_losses._beam_con[0:self._state_params.no_beams] > 0.5).any().type(torch.float32)
-            self._particle_trajectories.gripper_particles[i, 0, 1] = (self._hand_losses._beam_con[self._state_params.no_beams: 2 * self._state_params.no_beams] > 0.5).any().type(torch.float32)
+            if self._left_index is not None:
+                self._particle_trajectories.gripper_particles[i, 0, 0] = (self._hand_losses._beam_con[self._left_index] > 0.5).type(torch.float32)
+            else:
+                self._particle_trajectories.gripper_particles[i, 0, 0] = (self._hand_losses._beam_con[0:self._state_params.no_beams] > 0.5).any().type(torch.float32)
+            
+            if self._right_index is not None:
+                self._particle_trajectories.gripper_particles[i, 0, 1] = (self._hand_losses._beam_con[self._state_params.no_beams + self._right_index] > 0.5).type(torch.float32)
+            else:
+                self._particle_trajectories.gripper_particles[i, 0, 1] = (self._hand_losses._beam_con[self._state_params.no_beams: 2 * self._state_params.no_beams] > 0.5).any().type(torch.float32)
+
+           
         
         for k in range(1, self._params.no_steps, 1):
             for n in range(self._params.no_particles):

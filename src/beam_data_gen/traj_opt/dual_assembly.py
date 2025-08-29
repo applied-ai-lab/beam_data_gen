@@ -123,6 +123,19 @@ class DualArmStates:
             
         return state
     
+    def state_to_pose_quat(self, state: torch.tensor):
+        rows, _ = state.shape
+        pose_quat = np.zeros((rows, 7))
+
+        for k in range(rows):
+            pose_quat[k, 0:3] = state[k, 0:3].cpu().detach().numpy()
+
+            rot = R.from_euler("xyz", [0, 0, np.arctan2(state[k, 3].cpu().detach().numpy(), state[k, 4].cpu().detach().numpy())])
+            pose_quat[k, 3:] = rot.as_quat()
+
+        return pose_quat
+
+    
     # Beam Poses setters and getters
     @property
     def beam_poses(self):

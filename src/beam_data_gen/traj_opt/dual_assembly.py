@@ -77,7 +77,7 @@ class DualArmStates:
         # Pregrasp goals
         self._pregrasp_goal = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
 
-        self.offset = torch.tensor([0, 0, 0.25, 0, 0], dtype=torch.float32)
+        self.offset = torch.tensor([0, 0, 0.16, 0, 0], dtype=torch.float32)
         self.grasp_offset = self.offset.repeat(self.params.no_beams).view(-1, self.params.state_dim).to(self.params.device)
         
     def initialise(self):
@@ -518,7 +518,12 @@ class DualAssembly(TrajOptBase):
                 self._gradients.left_pose = 5.0 * self._gradients.pregrasp[self._left_index, :]
             else:
                 self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index]
-        
+            
+            # # Only move upwards vertically
+            # if self._gradients.left_pose[2] > 0.1:
+            #     self._gradients.left_pose[0:2] *= 0.0
+            #     self._gradients.left_pose[3:] *= 0.0
+            
         else:
             self._gradients.left_pose *= 0.0
         
@@ -531,7 +536,12 @@ class DualAssembly(TrajOptBase):
                 self._gradients.right_pose = 5.0 * self._gradients.pregrasp[self._right_index, :]
             else:
                 self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index] 
-                
+            
+            # # Only move upwards vertically
+            # if self._gradients.right_pose[2] > 0.1:
+            #     self._gradients.right_pose[0:2] *= 0.0
+            #     self._gradients.right_pose[3:] *= 0.0
+            
         else:
             self._gradients.right_pose *= 0.0            
         
@@ -540,8 +550,8 @@ class DualAssembly(TrajOptBase):
     def check_convergence(self, beam_conv_p, pregrasp_conv_p, left_loss, right_loss):
                 
         # Losses
-        self.active_left_loss = self._hand_losses._start_loss[0: self._state_params.no_beams].clone()
-        self.active_right_loss = self._hand_losses._start_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
+        self.active_left_loss = self._hand_losses._pregrasp_loss[0: self._state_params.no_beams].clone()
+        self.active_right_loss = self._hand_losses._pregrasp_loss[self._state_params.no_beams: 2 * self._state_params.no_beams].clone()
         
         # Pin penalties
         pin_indices = list(2 * k + 1 for k in range(self._state_params.no_pins))

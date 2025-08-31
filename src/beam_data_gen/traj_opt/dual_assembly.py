@@ -77,7 +77,7 @@ class DualArmStates:
         # Pregrasp goals
         self._pregrasp_goal = torch.zeros(self.params.no_beams * self.params.state_dim).view(-1, self.params.state_dim).to(self.params.device)
 
-        self.offset = torch.tensor([0, 0, 0.16, 0, 0], dtype=torch.float32)
+        self.offset = torch.tensor([0, 0, 0.25, 0, 0], dtype=torch.float32)
         self.grasp_offset = self.offset.repeat(self.params.no_beams).view(-1, self.params.state_dim).to(self.params.device)
         
     def initialise(self):
@@ -268,7 +268,7 @@ class HandLossesContacts(LossesContacts):
         return
     
     def calc_prob(self):
-        self._pregrasp_con = (self._pregrasp_loss < 0.02).type(torch.float32)
+        self._pregrasp_con = (self._pregrasp_loss < 0.01).type(torch.float32)
         # Which beams are in contact with the 
         self._beam_con = (self._beam_loss < 0.005).type(torch.float32)  
         # Check which beams are converged 
@@ -515,7 +515,7 @@ class DualAssembly(TrajOptBase):
             
             # If beam has converged
             if self._hand_losses._beam_conver_p[self._left_index] > 0.5:
-                self._gradients.left_pose = 1.0 * self._gradients.pregrasp[self._left_index, :]
+                self._gradients.left_pose = 5.0 * self._gradients.pregrasp[self._left_index, :]
             else:
                 self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index]
         
@@ -528,7 +528,7 @@ class DualAssembly(TrajOptBase):
                                         self._gradients.beam_poses[self._right_index, :] * right_contacts[self._right_index]
             
             if self._hand_losses._beam_conver_p[self._right_index] > 0.5:            
-                self._gradients.right_pose = 1.0 * self._gradients.pregrasp[self._right_index, :]
+                self._gradients.right_pose = 5.0 * self._gradients.pregrasp[self._right_index, :]
             else:
                 self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index] 
                 

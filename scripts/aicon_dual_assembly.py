@@ -1,7 +1,7 @@
 from typing import List
 import time
 from enum import Enum
-    
+import os
 
 import numpy as np
 import torch
@@ -41,6 +41,9 @@ def main():
     left_pose = torch.tensor([0.15, 0.25, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
     right_pose = torch.tensor([0.00, -0.25, 0.25, 0.0, 0.0], dtype=torch.float32).requires_grad_(True).to(device)
     
+    # No. runs
+    no_runs = 40
+    
     # Node names for consideration
     node_names = ["square_beam_1",
                     "square_pin_A",
@@ -79,8 +82,8 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
     
-    params = TrajOptParams(step_size=0.1,
-                            no_steps=300,
+    params = TrajOptParams(step_size=0.2,
+                            no_steps=180,
                             epsilon=1.e-3,
                             no_particles=1, 
                             device=device)
@@ -99,21 +102,47 @@ def main():
                             right_start=right_pose.clone(),
                             model=m, data=d)
     
-    # Set the values
-    states = DualArmStates(state_params)
-    states.beam_poses = pose_init_torch
-    states.left_pose = left_pose
-    states.right_pose = right_pose
-    states.left_start=left_pose.clone()
-    states.right_start=right_pose.clone()
-    states.beam_goal = pose_tar_torch
-    states.initialise()
+    # Beam losses
+    beam_loss = np.zeros((no_runs, params.no_steps))
     
-    # Set the states
-    traj_opt.states = states
+    for k in trange(no_runs):
+        
+        seed += 1
+        
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        
+        sampler.sample_poses(graph, sampler.uniform_pose_sampler)
+        pose_init = graph_to_pose(graph, node_names, process_data)
+        pose_init_torch = torch.tensor(pose_init, dtype=torch.float32).to(device).requires_grad_(True)
+        
+        # Set the values
+        states = DualArmStates(state_params)
+        states.beam_poses = pose_init_torch
+        states.left_pose = left_pose.clone()
+        states.right_pose = right_pose.clone()
+        states.left_start=left_pose.clone()
+        states.right_start=right_pose.clone()
+        states.beam_goal = pose_tar_torch
+        states.initialise()
+        
+        # Set the states
+        traj_opt.states = states
+        
+        # Optimise
+        particles = traj_opt.optimise()   
+        
+        # Beam loss
+        beam_loss[k, :] = particles.loss.cpu().detach().clone().numpy()  
+        
+        # Save beam losses
+        np.save(os.path.join("data", "beam_losses", "beam_loss.npy"), beam_loss)
     
-    # Optimise
-    particles = traj_opt.optimise()
+    plt.figure()
+    plt.plot(beam_loss.transpose()[1:, :])
+    
+    import pdb
+    pdb.set_trace()
     
     plt.figure()
     plt.plot(particles.no_live_particles)

@@ -1,6 +1,7 @@
 from typing import List
 import time
 from enum import Enum
+import json
     
 
 import numpy as np
@@ -12,11 +13,28 @@ import mujoco
 import mujoco.viewer
 from tqdm import trange
 
+
 from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGraph
 from beam_data_gen.models.datasets.process_data import ProcessData
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 from beam_data_gen.simulator.sim_robot import SimRobot
 from beam_data_gen.traj_opt.dual_assembly import DualAssembly, TrajOptParams, StateParams, DualArmStates
+
+
+def data_to_dict(name_lst, start_pose, goal_pose):
+    
+    data_dict = {'components': []}
+    for k, name in enumerate(name_lst):
+        comp_dict = {
+            'name': name,
+            'start_position': start_pose[k, 0:3].tolist(),
+            'start_orientation': start_pose[k, 3:].tolist(),
+            'goal_position': goal_pose[k, 0:3].tolist(),
+            'goal_orientation': goal_pose[k, 3:].tolist()
+        }
+        data_dict['components'].append(comp_dict)
+        
+    return data_dict        
 
 
 def graph_to_pose(graph: RampGraph, node_names: List[str], data_processor: ProcessData):
@@ -26,6 +44,16 @@ def graph_to_pose(graph: RampGraph, node_names: List[str], data_processor: Proce
         data = graph.graph.nodes[name]
         pose_target[data_processor.state_dim * k: data_processor.state_dim * (k + 1)] = data_processor.pose_to_rep(data['pose'])
     return pose_target
+
+
+def extract_pose(graph: RampGraph, node_names: List[str]):
+    no_nodes = len(node_names)
+    pose_mat = np.zeros((no_nodes, 7))
+    for k, name in enumerate(node_names):
+        data = graph.graph.nodes[name]
+        pose_mat[k, :] = data['pose'].to_pose_quat()
+    return pose_mat
+    
 
 
 def main():
@@ -59,6 +87,9 @@ def main():
     pose_target = graph_to_pose(graph, node_names, process_data)
     print(f"Pose target: {pose_target}")
     
+    # Extract the pose mat
+    pose_mat_np = extract_pose(graph, node_names)
+    
     pose_tar_torch = torch.tensor(pose_target, dtype=torch.float32).to(device)
     
     # Find initial condition
@@ -71,6 +102,19 @@ def main():
     # 
     pose_init = graph_to_pose(graph, node_names, process_data)
     print(f"Pose init: {pose_init}")
+    
+    # Extract the pose mat
+    pose_init_np = extract_pose(graph, node_names)
+    
+    # Create pose dict
+    data_dict = data_to_dict(node_names, pose_init_np, pose_mat_np)
+    
+    json_str = json.dumps(data_dict, indent=4)
+    with open("resources/desc/square_atls.json", "w") as f:
+        f.write(json_str)
+        
+    import pdb
+    pdb.set_trace()
     
     pose_init_torch = torch.tensor(pose_init, dtype=torch.float32).to(device)
     pose_torch = pose_init_torch.requires_grad_(True)

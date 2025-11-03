@@ -2,6 +2,7 @@ from typing import List
 import time
 from enum import Enum
 import json
+import copy
     
 
 import numpy as np
@@ -12,6 +13,7 @@ from matplotlib import pyplot as plt
 import mujoco
 import mujoco.viewer
 from tqdm import trange
+from scipy.spatial.transform import Rotation as R
 
 
 from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGraph
@@ -22,6 +24,9 @@ from beam_data_gen.traj_opt.dual_assembly import DualAssembly, TrajOptParams, St
 
 
 def data_to_dict(name_lst, start_pose, goal_pose):
+    
+    start_pose[:, 2] += 0.15
+    goal_pose[:, 2] += 0.15
     
     data_dict = {'components': []}
     for k, name in enumerate(name_lst):
@@ -93,7 +98,7 @@ def main():
     pose_tar_torch = torch.tensor(pose_target, dtype=torch.float32).to(device)
     
     # Find initial condition
-    trans_lims = [1.0, 1.0, 0.0]
+    trans_lims = [0.2, 0.2, 0.0]
     sampler = BeamSampler(trans_lims)
     # Remove all edges and perturb
     graph.A = np.zeros([no_nodes, no_nodes])

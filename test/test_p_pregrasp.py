@@ -30,17 +30,20 @@ def main():
         
         probs = p_ctrl._probs
         
-        x_hand = x_1[0: state_dim] 
-        x_comp = x_1[4 * state_dim: 5 * state_dim]
+        x_hand = x_1[0: state_dim, :] 
+        x_comp = x_1[4 * state_dim: 5 * state_dim, :]
         
         if k % 1 == 0:
-            print(f" Prob: {probs.p_d}, \
+            print(f" p_d: {probs.p_d}, \
                 Hand: {x_hand[0:3, :].reshape(1, -1)} \
-                d dot: {x_1[15:18, 0].reshape(1, -1)}, \
                 and Pregrasp: {x_1[10:13, 0].reshape(1, -1)}")
-            # print(f" Prob: {probs.p_c}, \
-            #     Hand: {x_hand[0:3, :].reshape(1, -1)}, \
-            #     and Comp: {x_comp[0:3, 0].reshape(1, -1)}")
+            print(f" p_C: {probs.p_c}, \
+                Hand: {x_hand[0:3, :].reshape(1, -1)}, \
+                and Comp: {x_comp[0:3, 0].reshape(1, -1)}")
+            
+        # if probs.p_c > 0.5 and probs.p_d > 0.5:
+        #     import pdb
+        #     pdb.set_trace()
         
         k += 1
     

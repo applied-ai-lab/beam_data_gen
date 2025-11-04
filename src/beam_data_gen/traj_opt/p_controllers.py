@@ -176,12 +176,12 @@ class PickPlaceWithPregrasp(LTIBase):
                 x_c: np.array,
                 x_c_tar: np.array):
         # Set x value
-        self._x[0:self._state_dim, :] = x_hand.reshape(-1, 1)
-        self._x[4 * self._state_dim: 5 * self._state_dim, :] = x_c.reshape(-1, 1)
+        self._x[0:self._state_dim, :] = x_hand.copy().reshape(-1, 1)
+        self._x[4 * self._state_dim: 5 * self._state_dim, :] = x_c.copy().reshape(-1, 1)
         
         self._u[0:self._state_dim, :] = x_c.reshape(-1, 1).copy() 
         self._u[2, 0] += self.height
-        self._u[self._state_dim: 2*self._state_dim, 0] = x_c_tar
+        self._u[self._state_dim: 2*self._state_dim, 0] = x_c_tar.copy()
         
         # Update probs
         self.probs_update()
@@ -230,10 +230,13 @@ class PickPlaceWithPregrasp(LTIBase):
         np.fill_diagonal(self._A[self._state_dim: 2 * self._state_dim,
                                     4 * self._state_dim: 5 * self._state_dim], 
                         (1. - probs.p_c_star) * (1. - probs.p_c) * (probs.p_d) - (1. - probs.p_c_star) * probs.p_c)
-        # # d update
+        # d update
         np.fill_diagonal(self._A[2 * self._state_dim: 3 * self._state_dim,
                                     0: self._state_dim], 
                         probs.p_d) 
+        np.fill_diagonal(self._A[2 * self._state_dim: 3 * self._state_dim,
+                                    self._state_dim: 2 * self._state_dim], 
+                        probs.p_d * self._Ts)
         np.fill_diagonal(self._A[2 * self._state_dim: 3 * self._state_dim,
                                     2 * self._state_dim: 3 * self._state_dim], 
                         (1. - probs.p_d))
@@ -254,6 +257,15 @@ class PickPlaceWithPregrasp(LTIBase):
         # np.fill_diagonal(self._A[5 * self._state_dim: 6 * self._state_dim,
         #                             4 * self._state_dim: 5 * self._state_dim], 
         #                 (1. - probs.p_c))
+        np.fill_diagonal(self._A[4 * self._state_dim: 5 * self._state_dim,
+                                    0 * self._state_dim: 1 * self._state_dim], 
+                        probs.p_c * (1. - probs.p_c_star))
+        np.fill_diagonal(self._A[4 * self._state_dim: 5 * self._state_dim,
+                                    1 * self._state_dim: 2 * self._state_dim], 
+                        probs.p_c * (1. - probs.p_c_star) * self._Ts)
+        np.fill_diagonal(self._A[4 * self._state_dim: 5 * self._state_dim,
+                                    4 * self._state_dim: 5 * self._state_dim], 
+                        (1. - probs.p_c))
         return
     
     def B_update(self, probs: PseudoProbs):
@@ -271,20 +283,23 @@ class PickPlaceWithPregrasp(LTIBase):
         return
         
     def A_init(self):
+        # h time integral update
         self._A[0: self._state_dim,
                 0: self._state_dim] = np.eye(self._state_dim)
         self._A[0: self._state_dim, 
                 self._state_dim: 2 * self._state_dim] = self._Ts * np.eye(self._state_dim)
         
+        # d time integral update
         self._A[2 *self._state_dim: 3 * self._state_dim,
                 2 *self._state_dim: 3 * self._state_dim] = np.eye(self._state_dim)
         self._A[2 *self._state_dim: 3 * self._state_dim,
                 3 *self._state_dim: 4 * self._state_dim] = self._Ts * np.eye(self._state_dim)
         
-        self._A[4 *self._state_dim: 5 * self._state_dim,
-                4 *self._state_dim: 5 * self._state_dim] = np.eye(self._state_dim)
-        self._A[4 *self._state_dim: 5 * self._state_dim,
-                5 *self._state_dim: 6 * self._state_dim] = self._Ts * np.eye(self._state_dim)
+        # c time integral update
+        # self._A[4 *self._state_dim: 5 * self._state_dim,
+                # 4 *self._state_dim: 5 * self._state_dim] = np.eye(self._state_dim)
+        # self._A[4 *self._state_dim: 5 * self._state_dim,
+                # 5 *self._state_dim: 6 * self._state_dim] = self._Ts * np.eye(self._state_dim)
         return
     
     def C_init(self):

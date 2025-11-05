@@ -206,17 +206,17 @@ class PickPlaceWithPregrasp(LTIBase):
         
         self._probs.p_c_star = self.contact_p(self._u[self._state_dim: 2*self._state_dim, 0],
                                   self._x[4 * self._state_dim: 5 * self._state_dim, 0],
-                                  epsilon)
+                                  0.05)
         
         self._probs.p_d_star = self.contact_p(self._u[0:self._state_dim, 0],
                                   self._x[2 * self._state_dim: 3 * self._state_dim, 0],
-                                  epsilon)
+                                  0.05)
         return
         
         
     @staticmethod
     def contact_p(x_h, x_c, epsilon):
-            return float(np.sum((x_h - x_c) ** 2.0) < epsilon) 
+            return float(np.mean((x_h - x_c) ** 2.0) < epsilon) 
         
         
     def A_update(self, probs: PseudoProbs):

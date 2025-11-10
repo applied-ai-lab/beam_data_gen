@@ -29,18 +29,6 @@ def main():
         # Set the x vector
         x1 = p_ctrl.advance(x_hand, x_comp, x_tar)
         
-        # # Calc pseudo probs
-        # p_tup = p_ctrl.calc_pseudo_p()
-        
-        # # Hash the pseudo pubs
-        # key = p_ctrl.hash_pseudo_p(*p_tup)
-        
-        # # Get p controller
-        # x1 = p_ctrl._trans_dict_p[key](p_ctrl._x)   
-        
-        # # Update the current state to the next one
-        # p_ctrl._x = x1
-        
         # Extract data from x
         x_hand = x1[0: state_dim, 0]
         x_comp = x1[2*state_dim:3*state_dim, 0]

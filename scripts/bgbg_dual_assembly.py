@@ -18,7 +18,8 @@ from beam_data_gen.beam_impl.Square_graph import square_connected_graph, RampGra
 from beam_data_gen.models.datasets.process_data import ProcessData
 from beam_data_gen.data_sampling.beam_sampler import BeamSampler
 from beam_data_gen.simulator.sim_robot import SimRobot
-from beam_data_gen.traj_opt.dual_assembly import DualAssembly, TrajOptParams, StateParams, DualArmStates
+from beam_data_gen.graph_ctrl.graph_dual_assembly import GraphDualAssembly, AssemblyParams
+from beam_data_gen.graph_ctrl.controllers import PickPlaceWithPregrasp
 
 
 def graph_to_pose(graph: RampGraph, node_names: List[str], data_processor: ProcessData):
@@ -41,6 +42,9 @@ def main():
     left_pose = np.array([0.15, 0.25, 0.25, 0.0, 0.0])
     right_pose = np.array([0.00, -0.25, 0.25, 0.0, 0.0])
     
+    # State dim
+    state_dim = left_pose.shape[0]
+    
     # Node names for consideration
     node_names = ["square_beam_1",
                     "square_pin_A",
@@ -57,7 +61,7 @@ def main():
     # Define the graph (ignore the hands for now)
     graph: RampGraph = square_connected_graph
     # Find the target
-    pose_target = graph_to_pose(graph, node_names, process_data)
+    pose_target = graph_to_pose(graph, node_names, process_data).reshape(-1, state_dim)
     print(f"Pose target: {pose_target}")
     
     # Find initial condition
@@ -68,15 +72,30 @@ def main():
     sampler.sample_poses(graph, sampler.uniform_pose_sampler)
     
     # Calc initial state
-    pose_init = graph_to_pose(graph, node_names, process_data)
+    pose_init = graph_to_pose(graph, node_names, process_data).reshape(-1, state_dim)
     print(f"Pose init: {pose_init}")
     
     # Simulate results
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
-
+     
+    params = AssemblyParams(state_dim, 2, no_nodes, 5.0e-3)
+    
+    # Planner creation
+    planner = GraphDualAssembly(params, PickPlaceWithPregrasp, node_names)
+    planner.initialise(pose_init, pose_target)
+    x_hands = np.vstack([left_pose, right_pose])
+    
+    import pdb
+    pdb.set_trace()
+    
+    # Plan with planner
+    x_traj = planner.plan(x_hands, pose_init, no_iters=1000)
+    
+    pdb.set_trace()
     
     
+    # Iterations    
     indices = particles.sample_indices()
     trajectory, gripper_states = particles.sample_trajectories(indices)
     trajectory = trajectory[:, 0:(state_params.no_hands + state_params.no_beams) * state_params.state_dim]

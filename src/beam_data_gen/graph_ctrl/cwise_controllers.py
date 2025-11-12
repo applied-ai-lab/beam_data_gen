@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
+from typing import List
 
 from beam_data_gen.graph_ctrl.controllers import PickPlaceWithPregrasp 
 
@@ -26,7 +27,7 @@ class CWiseControllers:
     
     def calc_pseudo_p(self):
         for key, item in self._ctrl_dict.items():
-            self._pseudo_p[key] = item.calc_pseudo_p
+            self._pseudo_p[key] = item.calc_pseudo_p()
         return self._pseudo_p
     
     def advance(self, key, x_hand, x_c, x_c_tar):

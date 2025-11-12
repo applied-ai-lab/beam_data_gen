@@ -50,8 +50,14 @@ class GraphDualAssembly:
         self._x_hand_mat = x_hands
         self._x_comp_mat = x_comps
         
+        # Set x_c values
+        self._controllers.set_x_c(self._x_comp_mat)
+        
+        # Calc the pseudo p
+        p_dict = self._controllers.calc_pseudo_p()
+        
         # Check for convergence
-        if self.check_convergence():
+        if self.check_convergence(p_dict):
             return x_hands, x_comps
         
         else:
@@ -67,7 +73,7 @@ class GraphDualAssembly:
                                                 )
            return x_left, x_right
         
-    def check_convergence(self):
+    def check_convergence(self, p_dict):
         # Calculate the target loss of each component
         self._tar_loss = self.row_wise_loss(self._x_comp_mat, self._x_tar_mat)
         
@@ -76,7 +82,7 @@ class GraphDualAssembly:
         right_dict = {}
         
         for k in range(self._params.no_components):
-            if self._tar_loss[k] > self._params.conv_tol:
+            if p_dict[self._keys[k]].p_c_star > 0.5 and p_dict[self._keys[k]].p_b_star > 0.5:
                 # Left
                 self._x_comp_mat[k, 1] > 0.0:
                     left_dict[k] = self._tar_loss[k]

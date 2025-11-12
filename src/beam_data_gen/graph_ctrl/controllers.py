@@ -5,6 +5,20 @@ import networkx as nx
 from beam_data_gen.graph_ctrl.ctrl_graph import CtrlGraph
 
 
+class PseudoProbs:
+    def __init__(self):
+        self.p_b = 0.0
+        self.p_b_star = 0.0
+        self.p_c = 0.0
+        self.p_c_star = 0.0
+        
+    def reset(self):
+        self.p_b = 0.0
+        self.p_b_star = 0.0
+        self.p_c = 0.0
+        self.p_c_star = 0.0
+
+
 class PickPlaceWithPregrasp:
     def __init__(self, state_dim):
         
@@ -18,6 +32,9 @@ class PickPlaceWithPregrasp:
         self._height = 0.08
         
         self.key = "0000"
+        
+        # Pseudo probs
+        self.pseudo_p = PseudoProbs()
                  
         # No connections
         A0 = np.zeros([no_nodes, no_nodes])
@@ -103,39 +120,39 @@ class PickPlaceWithPregrasp:
         self.set_x(x_hand, x_c, x_c_tar)
         
         # Calculate the pseudo probs
-        p_tup = self.calc_pseudo_p()
+        self.pseudo_p = self.calc_pseudo_p()
         
         # Hash the pseudo probs
-        self.key = self.hash_pseudo_p(*p_tup)
+        self.key = self.hash_pseudo_p()
         
         # Get the p controller and advance
         self._x = self._trans_dict_p[self.key](self._x)
         return self._x
         
-    def hash_pseudo_p(self, pb, pc, pb_star, pc_star):
-        return str(int(pb > 0.5)) + str(int(pc > 0.5)) + str(int(pb_star > 0.5)) + str(int(pc_star > 0.5))
+    def hash_pseudo_p(self):
+        return str(int(self.pseudo_p.p_b > 0.5)) + str(int(self.pseudo_p.p_c > 0.5)) + str(int(self.pseudo_p.p_b_star > 0.5)) + str(int(self.pseudo_p.p_c_star > 0.5))
     
     @staticmethod
     def contact_p(x_h, x_c, epsilon):
         return float(np.sum((x_h - x_c) ** 2.0) < epsilon)
     
     def calc_pseudo_p(self, epsilon=0.0005):
-        p_c = self.contact_p(self._x[0:self._state_dim, 0],
+        self.pseudo_p.p_c = self.contact_p(self._x[0:self._state_dim, 0],
                                   self._x[2 * self._state_dim: 3 * self._state_dim, 0],
                                   epsilon)
         
-        p_b = self.contact_p(self._x[0:self._state_dim, 0],
+        self.pseudo_p.p_b = self.contact_p(self._x[0:self._state_dim, 0],
                                   self._x[1 * self._state_dim: 2 * self._state_dim, 0],
                                   epsilon)
         
-        p_c_star = self.contact_p(self._x[2 * self._state_dim: 3*self._state_dim, 0],
+        self.pseudo_p.p_c_star = self.contact_p(self._x[2 * self._state_dim: 3*self._state_dim, 0],
                                   self._x[4 * self._state_dim: 5 * self._state_dim, 0],
                                   epsilon)
         
-        p_b_star = self.contact_p(self._x[self._state_dim: 2 *self._state_dim, 0],
+        self.pseudo_p.p_b_star = self.contact_p(self._x[self._state_dim: 2 *self._state_dim, 0],
                                   self._x[3 * self._state_dim: 4 * self._state_dim, 0],
                                   epsilon)
-        return p_b, p_c, p_b_star, p_c_star
+        return self.pseudo_p
     
     @property
     def x(self):
@@ -154,5 +171,10 @@ class PickPlaceWithPregrasp:
         self._x[3*self._state_dim + 2, 0] += self._height
         self._x[4*self._state_dim: 5*self._state_dim, 0] = x_c_tar.copy()
         return
+    
+    def set_x_c(self, x_c):
+        self._x[2*self._state_dim: 3*self._state_dim, 0] = x_c.copy()
+        return
+        
         
         

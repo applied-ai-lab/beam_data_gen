@@ -4,7 +4,7 @@ import networkx as nx
 
 
 class CtrlGraph:
-    def __init__(self, A: np.array, state_dim: int):
+    def __init__(self, A: np.array, state_dim: int, gain:np.array=None):
         self.A = A
         
         self._state_dim = state_dim
@@ -16,11 +16,18 @@ class CtrlGraph:
         self._Adyn = None
         
         # State vector
-        self._x = np.zeros((5 * self._state_dim, 1))
-        self._xdot = np.zeros((5 * self._state_dim, 1))
+        self._no_sub_states = 5
+        self._x = np.zeros((self._no_sub_states * self._state_dim, 1))
+        self._xdot = np.zeros((self._no_sub_states * self._state_dim, 1))
         
         # Gain matrix
-        self._gain = 0.05 * sp.eye(self._x.shape[0])
+        if gain is not None:
+            
+            assert gain.shape[0] == self._state_dim, f"The gain matrix (size: {gain.shape[0]}) must have the same size as state dim (size: {self._state_dim})."
+            
+            self.gain = gain
+        else:
+            self._gain = 0.05 * sp.eye(self._x.shape[0])
         
         self._height = 0.08
         
@@ -33,7 +40,14 @@ class CtrlGraph:
         
         self._xdot = self.Adyn @ self._x     
         self._x = self._x + self._gain @ self._xdot
+        # Normalise the orientation parts
+        self.normalise(self._x)
         return self._x   
+    
+    def normalise(self, x):        
+        for k in range(self._no_sub_states):
+            x[k * self._state_dim + 3: k * self._state_dim + 5, 0] /= np.linalg.norm(x[k * self._state_dim + 3: k * self._state_dim + 5, 0])
+        return
         
     @property
     def D(self):
@@ -55,7 +69,7 @@ class CtrlGraph:
     
     @gain.setter
     def gain(self, gain_diag):
-        self._gain = sp.diags(gain_diag)
+        self._gain = sp.kron(sp.eye(self._no_sub_states), sp.diags(gain_diag))
         return
 
     def to_graph(self):

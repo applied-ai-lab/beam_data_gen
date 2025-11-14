@@ -102,17 +102,18 @@ class PickPlaceWithPregrasp:
                        [1, 1, 0, 0, 0],
                        [0, 0, 1, 0, 0]])
         
+        gain = np.array([0.05, 0.05, 0.05, 0.1, 0.1])
         # Transition dict from pb, pc, pb*, pc*
-        self._trans_dict_p = {'0000': CtrlGraph(A2, self._state_dim),
-                              '0010': CtrlGraph(A2, self._state_dim),
-                              '1010': CtrlGraph(A4, self._state_dim),
-                              '1000': CtrlGraph(A4, self._state_dim),
-                              '0100': CtrlGraph(A6, self._state_dim),
-                              '1100': CtrlGraph(A6, self._state_dim), 
-                              '1101': CtrlGraph(A8, self._state_dim),
-                              '1001': CtrlGraph(A8, self._state_dim),
-                              '1011': CtrlGraph(A0, self._state_dim),
-                              '0011': CtrlGraph(A0, self._state_dim)
+        self._trans_dict_p = {'0000': CtrlGraph(A2, self._state_dim, gain),
+                              '0010': CtrlGraph(A2, self._state_dim, gain),
+                              '1010': CtrlGraph(A4, self._state_dim, gain),
+                              '1000': CtrlGraph(A4, self._state_dim, gain),
+                              '0100': CtrlGraph(A6, self._state_dim, gain),
+                              '1100': CtrlGraph(A6, self._state_dim, gain), 
+                              '1101': CtrlGraph(A8, self._state_dim, gain),
+                              '1001': CtrlGraph(A8, self._state_dim, gain),
+                              '1011': CtrlGraph(A0, self._state_dim, gain),
+                              '0011': CtrlGraph(A0, self._state_dim, gain)
                               }
         
     def advance(self, x_hand, x_c, x_c_tar):

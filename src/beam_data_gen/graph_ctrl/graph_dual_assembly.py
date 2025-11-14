@@ -74,7 +74,7 @@ class GraphDualAssembly:
                 
             if self._right_index:
                 x_right = self._controllers.advance(self._keys[self._right_index],
-                                                    self._x_hand_mat[0, :], 
+                                                    self._x_hand_mat[1, :], 
                                                     self._x_comp_mat[self._right_index, :], 
                                                     self._x_tar_mat[self._right_index, :]
                                                     )

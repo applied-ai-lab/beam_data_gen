@@ -65,7 +65,7 @@ def main():
     print(f"Pose target: {pose_target}")
     
     # Find initial condition
-    trans_lims = [0.2, 0.2, 0.0]
+    trans_lims = [1.0, 1.0, 0.0]
     sampler = BeamSampler(trans_lims)
     # Remove all edges and perturb
     graph.A = np.zeros([no_nodes, no_nodes])
@@ -79,26 +79,20 @@ def main():
     m = mujoco.MjModel.from_xml_path('resources/configs/robot_and_square.xml')
     d = mujoco.MjData(m)
      
-    params = AssemblyParams(state_dim, 2, no_nodes, 5.0e-3)
+    params = AssemblyParams(state_dim, 2, no_nodes, 5.0e-6)
     
     # Planner creation
     planner = GraphDualAssembly(params, PickPlaceWithPregrasp, node_names)
     planner.initialise(pose_init, pose_target)
     x_hands = np.vstack([left_pose, right_pose])
     
-    import pdb
-    pdb.set_trace()
-    
     # Plan with planner
-    x_traj = planner.plan(x_hands, pose_init, no_iters=1000)
+    trajectory = planner.plan(x_hands, pose_init, no_iters=1000) 
     
-    pdb.set_trace()
-    
-    
-    # Iterations    
-    indices = particles.sample_indices()
-    trajectory, gripper_states = particles.sample_trajectories(indices)
-    trajectory = trajectory[:, 0:(state_params.no_hands + state_params.no_beams) * state_params.state_dim]
+    # # Iterations    
+    # indices = particles.sample_indices()
+    # trajectory, gripper_states = particles.sample_trajectories(indices)
+    # trajectory = trajectory[:, 0:(state_params.no_hands + state_params.no_beams) * state_params.state_dim]
     
     # Visualisation runs
     with mujoco.viewer.launch_passive(m, d) as viewer:
@@ -120,7 +114,7 @@ def main():
                 viewer.sync()   
                 
                 # Rudimentary time keeping, will drift relative to wall clock.
-                time.sleep(0.2)
+                time.sleep(0.05)
     
     return 0    
 

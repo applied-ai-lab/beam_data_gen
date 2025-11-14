@@ -1,6 +1,7 @@
 from typing import List
 
 import numpy as np
+import torch
 from scipy.spatial.transform import Rotation as R
 
 from beam_data_gen.beam_impl.robot_graph import RobotGraph, RampGraph, nx
@@ -85,7 +86,15 @@ class SimRobot:
         return []
     
     def decode_x(self, data, x_pred):
-        denorm_output = self._data_processor.denorm_output(x_pred).cpu().detach().numpy()
+        
+        if isinstance(x_pred, torch.Tensor):
+            denorm_output = self._data_processor.denorm_output(x_pred).cpu().detach().numpy()
+        elif isinstance(x_pred, np.ndarray):
+            denorm_output = x_pred
+            
+            for k in range(denorm_output.shape[1] // 5):                
+                denorm_output[:, k*5+3:k*5+5] = np.arctan2(x_pred[:, 5*k + 3], x_pred[:, 5*k + 4])
+        
         beam_out = denorm_output[:, 2*5:]
         robot_out = denorm_output[:, 0:2*5]
         

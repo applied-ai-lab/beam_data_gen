@@ -383,6 +383,7 @@ class DualAssembly(TrajOptBase):
         # Convergence dict
         self._convergence = {}
         self._convergence_counter = {}
+        self._active_pair_idx: int = None
 
         # Hole-based convergence
         # _hole_positions: (no_beams, 3) world-frame XYZ of each beam's hole; None until first
@@ -446,6 +447,29 @@ class DualAssembly(TrajOptBase):
         return False
         
     
+    def _select_pair(self) -> int:
+        """Return the index into self._hole_pairs for the best unconverged pair.
+
+        Picks the pair whose holes are currently closest (smallest Euclidean
+        distance), so whichever pair the perception says is nearly assembled
+        gets priority.  Falls back to summed beam-goal loss when hole positions
+        are not yet available (e.g. in sim mode).
+        """
+        best_idx = None
+        best_score = float('inf')
+        for pair_idx, (a, b) in enumerate(self._hole_pairs):
+            if a in self._convergence and b in self._convergence:
+                continue
+            if self._hole_positions is not None:
+                score = float(np.linalg.norm(
+                    self._hole_positions[a] - self._hole_positions[b]))
+            else:
+                score = float(self.active_left_loss[a] + self.active_right_loss[b])
+            if score < best_score:
+                best_score = score
+                best_idx = pair_idx
+        return best_idx
+
     def optimise(self) -> ParticleTrajectories:
         
         # Create or reset the containers
@@ -682,6 +706,20 @@ class DualAssembly(TrajOptBase):
         left_dict = {}
         right_dict = {}
         
+        # Map each beam to its hole_pairs index
+        beam_to_pair = {}
+        for pair_idx, (a, b) in enumerate(self._hole_pairs):
+            beam_to_pair[a] = pair_idx
+            beam_to_pair[b] = pair_idx
+
+        # Re-select the active pair whenever it has just fully converged or on first call
+        active_converged = (
+            self._active_pair_idx is not None and
+            all(k in self._convergence for k in self._hole_pairs[self._active_pair_idx])
+        )
+        if self._active_pair_idx is None or active_converged:
+            self._active_pair_idx = self._select_pair()
+
         # Check if beams are in the goal location
         for k in range(self._state_params.no_beams):
             if self._beam_converged_by_holes(k):
@@ -691,12 +729,10 @@ class DualAssembly(TrajOptBase):
             else:
                 self._convergence_counter[k] = 0
 
-            # Test to see if a beam is still in play
-            if k not in self._convergence:
-                # Assign by goal y-position for stable assignment
+            # Only drive beams that belong to the currently active pair
+            if k not in self._convergence and beam_to_pair.get(k) == self._active_pair_idx:
                 if self._states.beam_goal[k, 1] >= 0.0:
                     left_dict[k] = self.active_left_loss[k]
-
                 if self._states.beam_goal[k, 1] < 0.0:
                     right_dict[k] = self.active_right_loss[k]
         

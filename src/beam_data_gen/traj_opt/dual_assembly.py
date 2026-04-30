@@ -229,6 +229,9 @@ class HandLossesContacts(LossesContacts):
         
         self._pregrasp_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._pregrasp_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        # Horizontal-only (x, y, sin, cos) pregrasp loss used for the pregrasp gate.
+        # Excludes z so that a descending arm is not pulled back up to pregrasp height.
+        self._pregrasp_horiz_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         
         self._beam_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._beam_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
@@ -252,10 +255,19 @@ class HandLossesContacts(LossesContacts):
         return self._gripper_con
         
     def calc_losses(self, states: DualArmStates):
-        self._pregrasp_loss[0:self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1), 
+        self._pregrasp_loss[0:self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1),
                                             states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
-        self._pregrasp_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1), 
+        self._pregrasp_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.pregrasp.view(self.params.no_beams, -1),
                                             states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+
+        # Horizontal-only (x, y, sin, cos — dims 0,1,3,4) pregrasp loss for the descent gate.
+        # Excludes z so the arm can descend through the full 16 cm hover without flipping the gate.
+        _horiz_idx = [0, 1, 3, 4]
+        pregrasp_horiz = states.pregrasp.view(self.params.no_beams, -1)[:, _horiz_idx]
+        self._pregrasp_horiz_loss[0:self.params.no_beams] = self._mse_none(
+            pregrasp_horiz, states.left_pose[_horiz_idx].repeat(self.params.no_beams, 1)).sum(dim=1)
+        self._pregrasp_horiz_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(
+            pregrasp_horiz, states.right_pose[_horiz_idx].repeat(self.params.no_beams, 1)).sum(dim=1)
         
         self._beam_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
                                             states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
@@ -285,7 +297,8 @@ class HandLossesContacts(LossesContacts):
         return
     
     def calc_prob(self):
-        self._pregrasp_con = (self._pregrasp_loss < 0.01).type(torch.float32)
+        # Gate on horizontal-only loss so z-descent does not flip the contact mode.
+        self._pregrasp_con = (self._pregrasp_horiz_loss < 0.01).type(torch.float32)
         # Which beams are in contact (position-only threshold ~5cm per axis)
         self._beam_con = (self._beam_pos_loss < _CONTACT_POS_THRESHOLD).type(torch.float32)
 

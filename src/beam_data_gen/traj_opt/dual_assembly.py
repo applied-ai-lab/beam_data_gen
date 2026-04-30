@@ -854,17 +854,27 @@ class DualAssembly(TrajOptBase):
         if self._active_pair_idx is None:
             return True
 
-        # Assign BOTH beams of the active pair to the two arms via 2×2 cost
-        # assignment.  Converged beams stay assigned so the holding arm keeps
-        # gripping while waiting for its partner — we never release a placed
-        # beam to chase another pair.
+        # Assign BOTH beams of the active pair to the two arms.  Once both arms
+        # are committed to beams in the active pair we KEEP that mapping for the
+        # whole pair — recomputing cost every cycle can flip the assignment when
+        # one arm drifts (e.g. after a missed grasp), which causes the other arm
+        # to race across the workspace and risk a collision.  The 2×2 cost
+        # assignment only runs on a fresh pair (no prior commitment).
         a, b = self._hole_pairs[self._active_pair_idx]
-        cost_ab = float(self.active_left_loss[a]) + float(self.active_right_loss[b])
-        cost_ba = float(self.active_left_loss[b]) + float(self.active_right_loss[a])
-        if cost_ab <= cost_ba:
-            self._left_index, self._right_index = a, b
+        prev_l = self._prev_arm_beam_idx[0]
+        prev_r = self._prev_arm_beam_idx[1]
+        active_set = {a, b}
+        if {prev_l, prev_r} == active_set:
+            # Sticky: reuse last cycle's commitment.
+            self._left_index  = prev_l
+            self._right_index = prev_r
         else:
-            self._left_index, self._right_index = b, a
+            cost_ab = float(self.active_left_loss[a]) + float(self.active_right_loss[b])
+            cost_ba = float(self.active_left_loss[b]) + float(self.active_right_loss[a])
+            if cost_ab <= cost_ba:
+                self._left_index, self._right_index = a, b
+            else:
+                self._left_index, self._right_index = b, a
 
         return False
     

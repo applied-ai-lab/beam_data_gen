@@ -729,38 +729,37 @@ class DualAssembly(TrajOptBase):
             else:
                 self._convergence_counter[k] = 0
 
-            # Only drive beams that belong to the currently active pair
-            if k not in self._convergence and beam_to_pair.get(k) == self._active_pair_idx:
-                if self._states.beam_goal[k, 1] >= 0.0:
-                    left_dict[k] = self.active_left_loss[k]
-                if self._states.beam_goal[k, 1] < 0.0:
-                    right_dict[k] = self.active_right_loss[k]
-        
+        # Collect unconverged beams from the active pair
+        active_pair_beams = []
+        if self._active_pair_idx is not None:
+            for k in self._hole_pairs[self._active_pair_idx]:
+                if k not in self._convergence:
+                    active_pair_beams.append(k)
+
         # Check if no tasks to do -- converged
-        if len(left_dict.keys()) == 0 and len(right_dict.keys()) == 0:
+        if not active_pair_beams and self._select_pair() is None:
             return True
-        
-        if len(left_dict.keys()) > 0:
-        
-            # Find the left smallest index
-            min_index = min(range(len(left_dict.values())), key=list(left_dict.values()).__getitem__)
-            self._left_index = list(left_dict.keys())[min_index]
-            
-            # Remove the left index from the right arm -- at this point, they are the same
-            if self._left_index in right_dict.keys():
-                right_dict.pop(self._left_index)
-            
-        else:            
-            self._left_index = None
-            
-        if len(right_dict.keys()) > 0:
-        
-            min_index = min(range(len(right_dict.values())), key=list(right_dict.values()).__getitem__)
-            self._right_index = list(right_dict.keys())[min_index]
-            
-        else:            
-            self._right_index = None
-            
+
+        # Assign active-pair beams to arms via 2x2 cost assignment so that
+        # each arm always gets exactly one beam regardless of y-position.
+        self._left_index = None
+        self._right_index = None
+
+        if len(active_pair_beams) == 2:
+            a, b = active_pair_beams
+            cost_ab = float(self.active_left_loss[a]) + float(self.active_right_loss[b])
+            cost_ba = float(self.active_left_loss[b]) + float(self.active_right_loss[a])
+            if cost_ab <= cost_ba:
+                self._left_index, self._right_index = a, b
+            else:
+                self._left_index, self._right_index = b, a
+        elif len(active_pair_beams) == 1:
+            k = active_pair_beams[0]
+            if float(self.active_left_loss[k]) <= float(self.active_right_loss[k]):
+                self._left_index = k
+            else:
+                self._right_index = k
+
         return False
     
     def normalise_pose(self, pose_torch: torch.tensor):

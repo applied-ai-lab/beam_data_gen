@@ -23,6 +23,8 @@ _CONVERGENCE_HYSTERESIS = 5
 USE_HOLE_CONVERGENCE = True
 # Euclidean distance threshold (metres) between paired hole transforms for convergence
 HOLE_CONVERGENCE_THRESHOLD = 0.003 # 3 mm
+# Weight of hole-collinearity gradient relative to beam-goal gradient
+_HOLE_GRADIENT_WEIGHT = 0.1
 
 
 class ParticleTrajectories:
@@ -511,6 +513,53 @@ class DualAssembly(TrajOptBase):
         
         return self._particle_trajectories
     
+    def _calc_hole_collinearity_loss(self) -> torch.Tensor:
+        """Hole-collinearity loss using perceived hole positions as targets.
+
+        For each beam k in a pair, the perceived hole world position is inverted
+        through the current (detached) beam transform to get the hole in beam-local
+        coordinates.  That local offset is then re-applied through the live beam
+        transform so gradients flow through position and yaw.  The resulting
+        predicted hole is pulled toward the partner beam's perceived hole position.
+
+        Returns zero if hole positions have not yet been set by set_hole_positions().
+        """
+        if not self._hole_pairs or self._hole_positions is None:
+            return torch.zeros(1, device=self.params.device)
+
+        beam = self._states.beam_poses  # (no_beams, state_dim), requires_grad
+        loss = torch.zeros(1, device=self.params.device)
+
+        for a, b in self._hole_pairs:
+            # Perceived hole positions as fixed world-frame targets (no gradient)
+            hole_a = torch.tensor(self._hole_positions[a, :2], dtype=torch.float32,
+                                  device=self.params.device)
+            hole_b = torch.tensor(self._hole_positions[b, :2], dtype=torch.float32,
+                                  device=self.params.device)
+
+            for k, hole_world, target in ((a, hole_a, hole_b), (b, hole_b, hole_a)):
+                # Detached current beam transform (R^{-1} = [[cos, sin], [-sin, cos]])
+                x_k = beam[k, 0].detach()
+                y_k = beam[k, 1].detach()
+                c_k = beam[k, 4].detach()   # cos θ
+                s_k = beam[k, 3].detach()   # sin θ
+
+                # Express perceived hole in beam-local frame
+                dx = hole_world[0] - x_k
+                dy = hole_world[1] - y_k
+                lx =  c_k * dx + s_k * dy  # R^{-1} · (hole − center)
+                ly = -s_k * dx + c_k * dy
+
+                # Re-apply live beam transform with gradients
+                # R(θ) · local = [[cos, −sin], [sin, cos]] · [lx, ly]
+                pred_x = beam[k, 0] + beam[k, 4] * lx - beam[k, 3] * ly
+                pred_y = beam[k, 1] + beam[k, 3] * lx + beam[k, 4] * ly
+
+                # Pull predicted hole toward partner's perceived hole
+                loss = loss + (pred_x - target[0]) ** 2 + (pred_y - target[1]) ** 2
+
+        return loss
+
     def gradients(self):
         # Calc losses
         self._hand_losses.calc_losses(self._states)
@@ -525,8 +574,15 @@ class DualAssembly(TrajOptBase):
         self._beam_losses.calc_losses(self._states)
         self._pregrasp_losses.calc_losses(self._states)
         
-        # Calculate beam gradients
+        # Calculate beam gradients (goal-position term)
         self._gradients.beam_poses = grad(outputs=self._beam_losses._beam_losses, inputs=self.states.beam_poses, retain_graph=True)[0]
+
+        # Secondary hole-collinearity gradient — weaker pull toward configurations
+        # where paired holes are coincident, independent of goal position accuracy.
+        if self._hole_pairs:
+            hole_loss = self._calc_hole_collinearity_loss()
+            hole_grad = grad(outputs=hole_loss, inputs=self._states.beam_poses, retain_graph=True)[0]
+            self._gradients.beam_poses = self._gradients.beam_poses + _HOLE_GRADIENT_WEIGHT * hole_grad
         
         self.left_loss = self._hand_losses._beam_loss[0:self._state_params.no_beams] * (left_pregrasp_c)  + \
                             self._hand_losses._pregrasp_loss[0:self._state_params.no_beams] * (1 - left_pregrasp_c)

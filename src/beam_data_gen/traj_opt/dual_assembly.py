@@ -13,6 +13,17 @@ from scipy.spatial.transform import Rotation as R
 from beam_data_gen.traj_opt.traj_opt_base import (TrajOptParams, TrajOptBase)
 from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
+# Position-only MSE threshold for contact detection (~5cm per axis)
+_CONTACT_POS_THRESHOLD = 0.0001
+# Number of consecutive cycles required before declaring beam convergence
+_CONVERGENCE_HYSTERESIS = 5
+
+# When True, convergence is declared by physical hole-alignment distance rather than
+# pose MSE. Set to False to fall back to the original beam_conv_p > 0.5 criterion.
+USE_HOLE_CONVERGENCE = True
+# Euclidean distance threshold (metres) between paired hole transforms for convergence
+HOLE_CONVERGENCE_THRESHOLD = 0.003 # 3 mm
+
 
 class ParticleTrajectories:
     def __init__(self):
@@ -102,10 +113,10 @@ class DualArmStates:
         
     
     def detach(self):
-        self.left_pose.detach()
-        self.right_pose.detach()
-        self.beam_poses.detach()
-        self.pregrasp.detach()
+        self.left_pose = self.left_pose.detach()
+        self.right_pose = self.right_pose.detach()
+        self.beam_poses = self.beam_poses.detach()
+        self.pregrasp = self.pregrasp.detach()
         return
     
     # Helper funcs
@@ -219,6 +230,7 @@ class HandLossesContacts(LossesContacts):
         
         self._beam_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._beam_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
+        self._beam_pos_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._gripper_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._gripper_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._beam_loss_none = torch.zeros((self.params.no_hands * self.params.no_beams, self.params.state_dim)).to(self.params.device)
@@ -233,12 +245,8 @@ class HandLossesContacts(LossesContacts):
         self._pregrasp_conver_p = torch.zeros(self.params.no_beams).to(self.params.device)
 
     def check_gripper_state(self, states: DualArmStates):
-        self._gripper_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
-        self._gripper_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
-        # Check the conditions
-        self._gripper_con = (self._beam_loss < 0.005).type(torch.float32)  
+        # Uses position-only loss populated by calc_losses
+        self._gripper_con = (self._beam_pos_loss < _CONTACT_POS_THRESHOLD).type(torch.float32)
         return self._gripper_con
         
     def calc_losses(self, states: DualArmStates):
@@ -265,23 +273,26 @@ class HandLossesContacts(LossesContacts):
         # Check which means are at target locations
         self._beam_conver_loss = self._mse_none(states.beam_poses, states.beam_goal).sum(1)
         self._pregrasp_conver_loss = self._mse_none(states.pregrasp, states.pregrasp_goal).sum(1)
+
+        # Position-only loss for contact detection (avoids orientation false negatives)
+        beam_pos = states.beam_poses.view(self.params.no_beams, -1)[:, 0:3]
+        self._beam_pos_loss[0:self.params.no_beams] = self._mse_none(
+            beam_pos, states.left_pose[:3].repeat(self.params.no_beams, 1)).sum(dim=1)
+        self._beam_pos_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(
+            beam_pos, states.right_pose[:3].repeat(self.params.no_beams, 1)).sum(dim=1)
         return
     
     def calc_prob(self):
         self._pregrasp_con = (self._pregrasp_loss < 0.01).type(torch.float32)
-        # Which beams are in contact with the 
-        self._beam_con = (self._beam_loss < 0.005).type(torch.float32)  
-        # Check which beams are converged 
+        # Which beams are in contact (position-only threshold ~5cm per axis)
+        self._beam_con = (self._beam_pos_loss < _CONTACT_POS_THRESHOLD).type(torch.float32)
+
+        # Check which beams are converged
         self._beam_conver_p = (self._beam_conver_loss < self.params.tol).type(torch.float32)
         self._pregrasp_conver_p = (self._pregrasp_conver_loss < self.params.tol).type(torch.float32)
-        
-        # Check if the beams have converged
-        for k in range(self.params.no_beams):
-            # If converged hand is not in contact
-            if self._beam_conver_p[k] > 0.5:
-                print( f" Release hand for beam {k} " )
-                self._beam_con[k] = 0.0
-                self._beam_con[self.params.no_beams + k] = 0.0
+        # NOTE: contact is NOT released here based on pose convergence alone.
+        # When USE_HOLE_CONVERGENCE=True, beam contact is released only after confirmed
+        # hole-based convergence (handled by DualAssembly.gradients()).
         return
     
     
@@ -306,14 +317,15 @@ class PregraspLosses(LossesContacts):
     
 
 class DualAssembly(TrajOptBase):
-    def __init__(self, 
-                params: TrajOptParams, 
-                state_params: StateParams, 
+    def __init__(self,
+                params: TrajOptParams,
+                state_params: StateParams,
                 sim: SquareRobotSim,
                 left_start: torch.Tensor,
-                right_start: torch.Tensor, 
+                right_start: torch.Tensor,
                 model: mujoco.MjModel,
-                data: mujoco.MjData):
+                data: mujoco.MjData,
+                hole_pairs: List[tuple] = None):
         
         super().__init__(params)
         
@@ -332,8 +344,8 @@ class DualAssembly(TrajOptBase):
         
         self.sim = sim
         
-        self._left_index = -1
-        self._right_index = -1
+        self._left_index = None
+        self._right_index = None
         
         if sim is not None:
             self.node_names = list(self.sim._geom_to_name.values())
@@ -349,7 +361,14 @@ class DualAssembly(TrajOptBase):
         
         # Convergence dict
         self._convergence = {}
-        
+        self._convergence_counter = {}
+
+        # Hole-based convergence
+        # _hole_positions: (no_beams, 3) world-frame XYZ of each beam's hole; None until first
+        # call to set_hole_positions()
+        self._hole_positions: np.ndarray = None
+        self._hole_pairs: List[tuple] = hole_pairs if hole_pairs is not None else []
+
         # Mujoco pointers
         self._mu_model = model
         self._mu_data = data
@@ -378,6 +397,32 @@ class DualAssembly(TrajOptBase):
         self._particle_trajectories.loss.zero_()
         self._weights = np.ones([self.params.no_particles])
         return
+
+    def set_hole_positions(self, positions: np.ndarray) -> None:
+        """Update world-frame hole positions each planning cycle.
+
+        Args:
+            positions: float array of shape (no_beams, 3) — XYZ position of each
+                       beam's hole transform in the robot base frame.
+        """
+        self._hole_positions = positions
+
+    def _beam_converged_by_holes(self, beam_idx: int) -> bool:
+        """Return True if the hole pair that includes *beam_idx* is within
+        HOLE_CONVERGENCE_THRESHOLD of each other.
+
+        Returns False if hole positions have not been set, or if beam_idx does
+        not appear in any defined hole pair (treating it as never convergeable
+        via holes).
+        """
+        if self._hole_positions is None:
+            return False
+        for idx_a, idx_b in self._hole_pairs:
+            if beam_idx in (idx_a, idx_b):
+                dist = float(np.linalg.norm(
+                    self._hole_positions[idx_a] - self._hole_positions[idx_b]))
+                return dist < HOLE_CONVERGENCE_THRESHOLD
+        return False
         
     
     def optimise(self) -> ParticleTrajectories:
@@ -431,7 +476,7 @@ class DualAssembly(TrajOptBase):
                                     self._states.beam_poses.reshape(-1),
                                     self._states.pregrasp.reshape(-1)], dim=0)
                 
-                self._x[0:(self._state_params.no_beams + self._state_params.no_hands) * self.state_dim] = self.normalise_pose(self._x[0:(self._state_params.no_beams + self._state_params.no_hands) * self.state_dim])
+                self._x[0:(self._state_params.no_beams * 2 + self._state_params.no_hands) * self.state_dim] = self.normalise_pose(self._x[0:(self._state_params.no_beams * 2 + self._state_params.no_hands) * self.state_dim])
                 self._particle_trajectories.particles[n, k, :] = self._x
                 # Gripper state
                 self._particle_trajectories.gripper_particles[n, k, 0] = (self._hand_losses._beam_con[0:self._state_params.no_beams] > 0.5).any().type(torch.float32)
@@ -443,12 +488,15 @@ class DualAssembly(TrajOptBase):
                 mujoco.mj_step(self._mu_model, self._mu_data)
                 
                 # Check for collisions with moving beams
+                _collided = False
                 if self._left_index is not None:
                     if self.sim.check_collisions(self._mu_data, self.node_names[self._left_index]):
-                        self._weights[n] = 1.0e-5
-                elif self._right_index is not None:
+                        _collided = True
+                if self._right_index is not None:
                     if self.sim.check_collisions(self._mu_data, self.node_names[self._right_index]):
-                        self._weights[n] = 1.0e-5
+                        _collided = True
+                if _collided:
+                    self._weights[n] = 1.0e-5
                 else:
                     self._weights[n] = 1.0
                     self._particle_trajectories.no_live_particles[k] += 1
@@ -488,13 +536,19 @@ class DualAssembly(TrajOptBase):
 
         # If converged return zeros for gradients
         if self.check_convergence(self._hand_losses._beam_conver_p,
-                                self._hand_losses._pregrasp_conver_p, 
+                                self._hand_losses._pregrasp_conver_p,
                                 self.left_loss,
                                 self.right_loss):
             self._gradients.zero()
             print(" Converged ")
             return self._gradients
-        
+
+        # Zero contact for beams that have confirmed hole-based convergence so the
+        # arm is free to move to the next task rather than continuing to push them.
+        for k in self._convergence:
+            self._hand_losses._beam_con[k] = 0.0
+            self._hand_losses._beam_con[self._state_params.no_beams + k] = 0.0
+
         self._gradients.beam_poses = (self._gradients.beam_poses * self._hand_losses._beam_con[0:self._state_params.no_beams].reshape(self._gradients.beam_poses.shape[0], 1) + \
                                         self._gradients.beam_poses * self._hand_losses._beam_con[self._state_params.no_beams:2*self._state_params.no_beams].reshape(self._gradients.beam_poses.shape[0], 1))
         # Apply noises
@@ -508,40 +562,30 @@ class DualAssembly(TrajOptBase):
         self._gradients.pregrasp = grad(outputs=self._pregrasp_losses.pregrasp_loss, inputs=self._states.pregrasp, retain_graph=True)[0]
         
         # Left gradients
-        if self._left_index is not None:            
-            # Hand gradients
+        if self._left_index is not None:
             self._gradients.left_pose = grad(self.left_loss[self._left_index], inputs=self.states.left_pose, retain_graph=True)[0] * (1. - left_contacts[self._left_index]) + \
                                         self._gradients.beam_poses[self._left_index, :] * left_contacts[self._left_index]
-            
-            # If beam has converged
-            if self._hand_losses._beam_conver_p[self._left_index] > 0.5:
-                self._gradients.left_pose = 5.0 * self._gradients.pregrasp[self._left_index, :]
-            else:
-                self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index]
-            
+            self._gradients.pregrasp[self._left_index] = self._gradients.left_pose * left_pregrasp_c[self._left_index]
+
             # Only move upwards vertically
             if self._gradients.left_pose[2] < -0.15:
                 self._gradients.left_pose[0:2] *= 0.0
                 self._gradients.left_pose[3:] *= 0.0
-            
+
         else:
             self._gradients.left_pose *= 0.0
-        
+
         # Right gradients
         if self._right_index is not None:
             self._gradients.right_pose = grad(self.right_loss[self._right_index], inputs=self.states.right_pose, retain_graph=True)[0] * (1. - right_contacts[self._right_index]) + \
                                         self._gradients.beam_poses[self._right_index, :] * right_contacts[self._right_index]
-            
-            if self._hand_losses._beam_conver_p[self._right_index] > 0.5:            
-                self._gradients.right_pose = 5.0 * self._gradients.pregrasp[self._right_index, :]
-            else:
-                self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index] 
-            
+            self._gradients.pregrasp[self._right_index] = self._gradients.right_pose * right_pregrasp_c[self._right_index]
+
             # Only move upwards vertically
             if self._gradients.right_pose[2] < -0.15:
                 self._gradients.right_pose[0:2] *= 0.0
                 self._gradients.right_pose[3:] *= 0.0
-            
+
         else:
             self._gradients.right_pose *= 0.0            
         
@@ -565,19 +609,27 @@ class DualAssembly(TrajOptBase):
         
         # Check if beams are in the goal location
         for k in range(self._state_params.no_beams):
-            # Check to see if the beam has reached the goal
-            if beam_conv_p[k] > 0.5 and pregrasp_conv_p[k] > 0.5:
-                
-                self._convergence[k] = True
-                
-            # Test to see if a beam is still in play
+            # Select convergence criterion for beam k
+            if USE_HOLE_CONVERGENCE and self._hole_pairs:
+                beam_converged = self._beam_converged_by_holes(k)
             else:
-                # Check left
-                if self._states.beam_poses[k, 1] > -0.0:
+                beam_converged = beam_conv_p[k] > 0.5
+
+            gate = beam_converged if (USE_HOLE_CONVERGENCE and self._hole_pairs) else (beam_converged and pregrasp_conv_p[k] > 0.5)
+            if gate:
+                self._convergence_counter[k] = self._convergence_counter.get(k, 0) + 1
+                if self._convergence_counter[k] >= _CONVERGENCE_HYSTERESIS:
+                    self._convergence[k] = True
+            else:
+                self._convergence_counter[k] = 0
+
+            # Test to see if a beam is still in play
+            if k not in self._convergence:
+                # Assign by goal y-position for stable assignment
+                if self._states.beam_goal[k, 1] >= 0.0:
                     left_dict[k] = self.active_left_loss[k]
-                
-                # Check right    
-                if self._states.beam_poses[k, 1] < 0.0:
+
+                if self._states.beam_goal[k, 1] < 0.0:
                     right_dict[k] = self.active_right_loss[k]
         
         # Check if no tasks to do -- converged

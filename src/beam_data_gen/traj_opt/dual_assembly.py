@@ -496,7 +496,7 @@ class DualAssembly(TrajOptBase):
     # _beam_pos_loss to climb from 0 → threshold after the grip is lost.
     _CONTACT_HOLD_CYCLES = 20
 
-    def _check_missed_grasp(self) -> None:
+    def _check_missed_grasp(self) -> bool:
         """Detect a missed grasp and reset pregrasp to force the arm to rise before re-gripping.
 
         Uses a sticky hold counter so the detection window spans multiple planning cycles.
@@ -507,8 +507,16 @@ class DualAssembly(TrajOptBase):
         False-positive guards:
           - Skip if the beam is already marked converged (successful placement).
           - Reset the counter whenever the arm is re-assigned to a different beam.
+
+        Returns True iff pregrasp was reset (caller must rebuild the autograd graph).
         """
         no_beams = self._state_params.no_beams
+        any_reset = False
+        # Build the replacement pregrasp tensor lazily so we never modify the
+        # existing one in-place (that would corrupt the autograd graph that
+        # calc_losses just constructed against it).
+        new_pregrasp = None
+
         for arm_side in range(2):
             prev_idx = self._prev_arm_beam_idx[arm_side]
             if prev_idx is None:
@@ -533,18 +541,27 @@ class DualAssembly(TrajOptBase):
             # Detect: recently had contact AND arm has now drifted away from beam.
             if (self._contact_hold_counter[arm_side] > 0
                     and current_loss > self._MISSED_GRASP_LOSS_THRESHOLD):
+                if new_pregrasp is None:
+                    new_pregrasp = self._states.pregrasp.detach().clone()
                 with torch.no_grad():
-                    self._states.pregrasp[prev_idx] = (
+                    new_pregrasp[prev_idx] = (
                         self._states.beam_poses.view(no_beams, -1)[prev_idx].detach()
                         + self._states.grasp_offset[prev_idx].detach()
                     )
                 self._contact_hold_counter[arm_side] = 0
                 self._missed_grasp_count += 1
+                any_reset = True
                 print(
                     f"[MISSED GRASP] {'left' if arm_side == 0 else 'right'} arm lost beam {prev_idx}"
                     f" (loss={current_loss:.4f})"
                     " — resetting pregrasp"
                 )
+
+        if any_reset:
+            self._states.pregrasp = new_pregrasp
+            self._states.pregrasp.requires_grad_(True)
+
+        return any_reset
 
     def optimise(self) -> ParticleTrajectories:
 
@@ -559,7 +576,11 @@ class DualAssembly(TrajOptBase):
         self._hand_losses.calc_prob()
 
         # Detect missed grasp before computing any gradients this cycle.
-        self._check_missed_grasp()
+        # If pregrasp was reset, rebuild the loss graph against the new tensor —
+        # the previous calc_losses output references the old pregrasp leaf.
+        if self._check_missed_grasp():
+            self._hand_losses.calc_losses(self._states)
+            self._hand_losses.calc_prob()
 
         # Set the initial particles to the states
         for i in range(self._params.no_particles):

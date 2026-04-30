@@ -16,21 +16,21 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 # Squared-distance threshold for contact detection (3D position).
 # 0.002 ≈ 4.5 cm effective radius — large enough to tolerate AprilTag noise and
 # imperfect IK tracking on the real robot.
-_CONTACT_POS_THRESHOLD = 0.002
+_CONTACT_POS_THRESHOLD = 0.001
 # Extra downward offset applied to the arm descent target relative to the perceived
 # beam position. Compensates for the AprilTag z being at the beam top surface while
 # the gripper needs to close around the beam body 2-3 cm lower.
-_GRASP_Z_DESCENT = 0.025
+_GRASP_Z_DESCENT = 0.01
 # Number of consecutive cycles required before declaring beam convergence
 _CONVERGENCE_HYSTERESIS = 5
 
-# When True, convergence is declared by physical hole-alignment distance rather than
-# pose MSE. Set to False to fall back to the original beam_conv_p > 0.5 criterion.
-USE_HOLE_CONVERGENCE = True
 # Euclidean distance threshold (metres) between paired hole transforms for convergence
-HOLE_CONVERGENCE_THRESHOLD = 0.003 # 3 mm
+HOLE_CONVERGENCE_THRESHOLD = 0.002 # 3 mm
 # Weight of hole-collinearity gradient relative to beam-goal gradient
 _HOLE_GRADIENT_WEIGHT = 0.1
+# Multiplier applied to the yaw (sin/cos) components of the beam gradient, boosting
+# rotational correction relative to translational. Increase to prioritise alignment.
+_YAW_GRADIENT_WEIGHT = 0.8
 
 
 class ParticleTrajectories:
@@ -631,7 +631,7 @@ class DualAssembly(TrajOptBase):
         self._gradients.beam_poses += min(torch.norm(self._gradients.beam_poses, p=2.0), 1.0) * noise * self.w
         self._gradients.beam_poses = (self._gradients.beam_poses * left_contacts.reshape(self._gradients.beam_poses.shape[0], 1) + self._gradients.beam_poses * right_contacts.reshape(self._gradients.beam_poses.shape[0], 1))
         
-        self._gradients.beam_poses[:, 3:5] *= 1.5
+        self._gradients.beam_poses[:, 3:5] *= _YAW_GRADIENT_WEIGHT
         
         # Calculate the gradients for the pregrasp pose
         self._gradients.pregrasp = grad(outputs=self._pregrasp_losses.pregrasp_loss, inputs=self._states.pregrasp, retain_graph=True)[0]
@@ -684,14 +684,7 @@ class DualAssembly(TrajOptBase):
         
         # Check if beams are in the goal location
         for k in range(self._state_params.no_beams):
-            # Select convergence criterion for beam k
-            if USE_HOLE_CONVERGENCE and self._hole_pairs:
-                beam_converged = self._beam_converged_by_holes(k)
-            else:
-                beam_converged = beam_conv_p[k] > 0.5
-
-            gate = beam_converged if (USE_HOLE_CONVERGENCE and self._hole_pairs) else (beam_converged and pregrasp_conv_p[k] > 0.5)
-            if gate:
+            if self._beam_converged_by_holes(k):
                 self._convergence_counter[k] = self._convergence_counter.get(k, 0) + 1
                 if self._convergence_counter[k] >= _CONVERGENCE_HYSTERESIS:
                     self._convergence[k] = True

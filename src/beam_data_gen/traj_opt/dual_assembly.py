@@ -385,6 +385,23 @@ class DualAssembly(TrajOptBase):
         self._convergence_counter = {}
         self._active_pair_idx: int = None
 
+        # Hard z floor for both arms.  Set to the table surface height plus any
+        # safety margin so the planner can never drive the arms underground.
+        # Set to None to disable the limit.
+        self.arm_z_floor: float = 0.69
+
+        # Missed-grasp detection.
+        # _contact_hold_counter: set to _CONTACT_HOLD_CYCLES when the arm has
+        #   contact, decremented each cycle otherwise.  This gives a multi-cycle
+        #   window to detect a slip even though gradient steps are small and
+        #   _beam_con drops quickly once the arm starts drifting.
+        # _prev_arm_beam_idx: beam index each arm was targeting last cycle.
+        #   Reset to 0 when the beam assignment changes so we never false-fire
+        #   on a newly-assigned beam.
+        self._contact_hold_counter = [0, 0]
+        self._prev_arm_beam_idx    = [None, None]
+        self._missed_grasp_count   = 0
+
         # Hole-based convergence
         # _hole_positions: (no_beams, 3) world-frame XYZ of each beam's hole; None until first
         # call to set_hole_positions()
@@ -470,8 +487,67 @@ class DualAssembly(TrajOptBase):
                 best_idx = pair_idx
         return best_idx
 
+    # Arm must drift this far from the beam (pos-only MSE) to trigger a missed-grasp reset.
+    # Kept deliberately small so the window between _beam_con dropping and detection is tight.
+    _MISSED_GRASP_LOSS_THRESHOLD = _CONTACT_POS_THRESHOLD * 3.0  # 0.003 — ~5 cm 3-D distance
+
+    # How many cycles the "recently had contact" window stays open after _beam_con drops.
+    # Gradient steps are small (~0.001 pos-loss per step), so we need ~10-20 cycles for
+    # _beam_pos_loss to climb from 0 → threshold after the grip is lost.
+    _CONTACT_HOLD_CYCLES = 20
+
+    def _check_missed_grasp(self) -> None:
+        """Detect a missed grasp and reset pregrasp to force the arm to rise before re-gripping.
+
+        Uses a sticky hold counter so the detection window spans multiple planning cycles.
+        _beam_con drops almost immediately after contact is lost (threshold 0.001), but the
+        arm drifts slowly, so we need ~10+ cycles for _beam_pos_loss to exceed the detection
+        threshold.  The counter keeps the window open long enough to catch the slip.
+
+        False-positive guards:
+          - Skip if the beam is already marked converged (successful placement).
+          - Reset the counter whenever the arm is re-assigned to a different beam.
+        """
+        no_beams = self._state_params.no_beams
+        for arm_side in range(2):
+            prev_idx = self._prev_arm_beam_idx[arm_side]
+            if prev_idx is None:
+                self._contact_hold_counter[arm_side] = 0
+                continue
+
+            loss_idx = arm_side * no_beams + prev_idx
+            current_loss    = self._hand_losses._beam_pos_loss[loss_idx].item()
+            currently_in_contact = self._hand_losses._beam_con[loss_idx].item() > 0.5
+
+            # Refresh or decay the hold counter.
+            if currently_in_contact:
+                self._contact_hold_counter[arm_side] = self._CONTACT_HOLD_CYCLES
+            else:
+                self._contact_hold_counter[arm_side] = max(
+                    0, self._contact_hold_counter[arm_side] - 1)
+
+            # Skip if beam was successfully placed — this is not a miss.
+            if prev_idx in self._convergence:
+                continue
+
+            # Detect: recently had contact AND arm has now drifted away from beam.
+            if (self._contact_hold_counter[arm_side] > 0
+                    and current_loss > self._MISSED_GRASP_LOSS_THRESHOLD):
+                with torch.no_grad():
+                    self._states.pregrasp[prev_idx] = (
+                        self._states.beam_poses.view(no_beams, -1)[prev_idx].detach()
+                        + self._states.grasp_offset[prev_idx].detach()
+                    )
+                self._contact_hold_counter[arm_side] = 0
+                self._missed_grasp_count += 1
+                print(
+                    f"[MISSED GRASP] {'left' if arm_side == 0 else 'right'} arm lost beam {prev_idx}"
+                    f" (loss={current_loss:.4f})"
+                    " — resetting pregrasp"
+                )
+
     def optimise(self) -> ParticleTrajectories:
-        
+
         # Create or reset the containers
         if self._particle_trajectories is None:
             self.initialise(self.states)
@@ -481,7 +557,10 @@ class DualAssembly(TrajOptBase):
         # Calc losses
         self._hand_losses.calc_losses(self._states)
         self._hand_losses.calc_prob()
-        
+
+        # Detect missed grasp before computing any gradients this cycle.
+        self._check_missed_grasp()
+
         # Set the initial particles to the states
         for i in range(self._params.no_particles):
             self._particle_trajectories.particles[i, 0, :] = self._x
@@ -509,8 +588,14 @@ class DualAssembly(TrajOptBase):
                 self._states.left_pose = self._states.left_pose - self.params.step_size * gradients.left_pose
                 self._states.right_pose = self._states.right_pose - self.params.step_size * gradients.right_pose
                 self._states.beam_poses = self._states.beam_poses - self.params.step_size * gradients.beam_poses
-                self._states.pregrasp = self._states.pregrasp - self.params.step_size * gradients.pregrasp         
-                
+                self._states.pregrasp = self._states.pregrasp - self.params.step_size * gradients.pregrasp
+
+                # Enforce arm z floor (hard constraint — overrides gradient).
+                if self.arm_z_floor is not None:
+                    with torch.no_grad():
+                        self._states.left_pose[2]  = torch.clamp(self._states.left_pose[2],  min=self.arm_z_floor)
+                        self._states.right_pose[2] = torch.clamp(self._states.right_pose[2], min=self.arm_z_floor)
+
                 self._states.detach()       
                 
                 self._particle_trajectories.loss[n, k] = self._beam_losses._beam_losses.sum()
@@ -522,6 +607,13 @@ class DualAssembly(TrajOptBase):
                                     self._states.pregrasp.reshape(-1)], dim=0)
                 
                 self._x[0:(self._state_params.no_beams * 2 + self._state_params.no_hands) * self.state_dim] = self.normalise_pose(self._x[0:(self._state_params.no_beams * 2 + self._state_params.no_hands) * self.state_dim])
+                # Sync normalised (z-clipped) pregrasp back to states so the next
+                # gradient step starts from the clipped value.  Without this, the
+                # gradient can drag pregrasp z below the floor indefinitely because
+                # normalise_pose only clips _x, not _states.pregrasp.
+                _pg_start = (self._state_params.no_hands + self._state_params.no_beams) * self.state_dim
+                self._states.pregrasp = self._x[_pg_start:_pg_start + self._state_params.no_beams * self.state_dim].view(self._state_params.no_beams, self.state_dim).detach()
+                self._states.pregrasp.requires_grad_(True)
                 self._particle_trajectories.particles[n, k, :] = self._x
                 # Gripper state
                 self._particle_trajectories.gripper_particles[n, k, 0] = (self._hand_losses._beam_con[0:self._state_params.no_beams] > 0.5).any().type(torch.float32)
@@ -552,8 +644,16 @@ class DualAssembly(TrajOptBase):
             indices = systematic_resample(self._weights)
             self._particle_trajectories.particles[:, k, :] = self._particle_trajectories.particles[indices, k, :]
             self._particle_trajectories.gripper_particles[:, k, :] = self._particle_trajectories.gripper_particles[indices, k, :]
-            self._particle_trajectories.indices[k] = torch.tensor(indices)                
-        
+            self._particle_trajectories.indices[k] = torch.tensor(indices)
+
+        # Update per-arm beam tracking for next cycle's missed-grasp detection.
+        # Reset the hold counter whenever the arm is assigned to a different beam so
+        # we never false-fire on a beam the arm has not yet touched.
+        for arm_side, new_idx in enumerate([self._left_index, self._right_index]):
+            if new_idx != self._prev_arm_beam_idx[arm_side]:
+                self._contact_hold_counter[arm_side] = 0
+            self._prev_arm_beam_idx[arm_side] = new_idx
+
         return self._particle_trajectories
     
     def _calc_hole_collinearity_loss(self) -> torch.Tensor:
@@ -729,43 +829,32 @@ class DualAssembly(TrajOptBase):
             else:
                 self._convergence_counter[k] = 0
 
-        # Collect unconverged beams from the active pair
-        active_pair_beams = []
-        if self._active_pair_idx is not None:
-            for k in self._hole_pairs[self._active_pair_idx]:
-                if k not in self._convergence:
-                    active_pair_beams.append(k)
-
         # Check if no tasks to do -- converged
-        if not active_pair_beams and self._select_pair() is None:
+        if self._active_pair_idx is None:
             return True
 
-        # Assign active-pair beams to arms via 2x2 cost assignment so that
-        # each arm always gets exactly one beam regardless of y-position.
-        self._left_index = None
-        self._right_index = None
-
-        if len(active_pair_beams) == 2:
-            a, b = active_pair_beams
-            cost_ab = float(self.active_left_loss[a]) + float(self.active_right_loss[b])
-            cost_ba = float(self.active_left_loss[b]) + float(self.active_right_loss[a])
-            if cost_ab <= cost_ba:
-                self._left_index, self._right_index = a, b
-            else:
-                self._left_index, self._right_index = b, a
-        elif len(active_pair_beams) == 1:
-            k = active_pair_beams[0]
-            if float(self.active_left_loss[k]) <= float(self.active_right_loss[k]):
-                self._left_index = k
-            else:
-                self._right_index = k
+        # Assign BOTH beams of the active pair to the two arms via 2×2 cost
+        # assignment.  Converged beams stay assigned so the holding arm keeps
+        # gripping while waiting for its partner — we never release a placed
+        # beam to chase another pair.
+        a, b = self._hole_pairs[self._active_pair_idx]
+        cost_ab = float(self.active_left_loss[a]) + float(self.active_right_loss[b])
+        cost_ba = float(self.active_left_loss[b]) + float(self.active_right_loss[a])
+        if cost_ab <= cost_ba:
+            self._left_index, self._right_index = a, b
+        else:
+            self._left_index, self._right_index = b, a
 
         return False
     
     def normalise_pose(self, pose_torch: torch.tensor):
-        no_items = pose_torch.shape[0] // self.state_dim    
+        no_items = pose_torch.shape[0] // self.state_dim
         for k in range(no_items):
-            pose_torch[self.state_dim * k + 2] = max(pose_torch[self.state_dim * k + 2], 0.021)
+            z_min = 0.021
+            # Apply the tighter arm z floor to the arm elements (first no_hands items).
+            if self.arm_z_floor is not None and k < self._state_params.no_hands:
+                z_min = max(z_min, self.arm_z_floor)
+            pose_torch[self.state_dim * k + 2] = max(pose_torch[self.state_dim * k + 2], z_min)
             pose_torch[self.state_dim * k + 3: self.state_dim * k + 5] = \
                 torch.nn.functional.normalize(pose_torch[self.state_dim * k + 3: self.state_dim * k + 5], dim=0)
         return pose_torch

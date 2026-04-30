@@ -16,7 +16,7 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 # Squared-distance threshold for contact detection (3D position).
 # 0.002 ≈ 4.5 cm effective radius — large enough to tolerate AprilTag noise and
 # imperfect IK tracking on the real robot.
-_CONTACT_POS_THRESHOLD = 0.001
+_CONTACT_POS_THRESHOLD = 0.0005
 # Extra downward offset applied to the arm descent target relative to the perceived
 # beam position. Compensates for the AprilTag z being at the beam top surface while
 # the gripper needs to close around the beam body 2-3 cm lower.
@@ -25,7 +25,7 @@ _GRASP_Z_DESCENT = 0.01
 _CONVERGENCE_HYSTERESIS = 5
 
 # Euclidean distance threshold (metres) between paired hole transforms for convergence
-HOLE_CONVERGENCE_THRESHOLD = 0.002 # 3 mm
+HOLE_CONVERGENCE_THRESHOLD = 0.003 # 3 mm
 # Weight of hole-collinearity gradient relative to beam-goal gradient
 _HOLE_GRADIENT_WEIGHT = 0.1
 # Multiplier applied to the yaw (sin/cos) components of the beam gradient, boosting

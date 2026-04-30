@@ -13,8 +13,14 @@ from scipy.spatial.transform import Rotation as R
 from beam_data_gen.traj_opt.traj_opt_base import (TrajOptParams, TrajOptBase)
 from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
-# Position-only MSE threshold for contact detection (~5cm per axis)
-_CONTACT_POS_THRESHOLD = 0.0001
+# Squared-distance threshold for contact detection (3D position).
+# 0.002 ≈ 4.5 cm effective radius — large enough to tolerate AprilTag noise and
+# imperfect IK tracking on the real robot.
+_CONTACT_POS_THRESHOLD = 0.002
+# Extra downward offset applied to the arm descent target relative to the perceived
+# beam position. Compensates for the AprilTag z being at the beam top surface while
+# the gripper needs to close around the beam body 2-3 cm lower.
+_GRASP_Z_DESCENT = 0.025
 # Number of consecutive cycles required before declaring beam convergence
 _CONVERGENCE_HYSTERESIS = 5
 
@@ -269,31 +275,31 @@ class HandLossesContacts(LossesContacts):
         self._pregrasp_horiz_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(
             pregrasp_horiz, states.right_pose[_horiz_idx].repeat(self.params.no_beams, 1)).sum(dim=1)
         
-        self._beam_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
-        self._beam_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-                                            states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
-        
-        # self._beam_loss_none[0:self.params.no_beams, :] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-        #                                     states.left_pose.repeat(self.params.no_beams, 1))
-        # self._beam_loss_none[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
-        #                                     states.right_pose.repeat(self.params.no_beams, 1))
-        
-        self._start_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+        # Grasp target: beam position shifted down by _GRASP_Z_DESCENT so the arm
+        # descends below the AprilTag surface z to the actual graspable part of the beam.
+        grasp_target = states.beam_poses.view(self.params.no_beams, -1).detach().clone()
+        grasp_target[:, 2] = grasp_target[:, 2] - _GRASP_Z_DESCENT
+
+        self._beam_loss[0:self.params.no_beams] = self._mse_none(
+            grasp_target, states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+        self._beam_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(
+            grasp_target, states.right_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
+
+        self._start_loss[0:self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1),
                                             states.left_start.repeat(self.params.no_beams, 1)).sum(dim=1)
-        self._start_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1), 
+        self._start_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(states.beam_poses.view(self.params.no_beams, -1),
                                             states.right_start.repeat(self.params.no_beams, 1)).sum(dim=1)
-        
+
         # Check which means are at target locations
         self._beam_conver_loss = self._mse_none(states.beam_poses, states.beam_goal).sum(1)
         self._pregrasp_conver_loss = self._mse_none(states.pregrasp, states.pregrasp_goal).sum(1)
 
-        # Position-only loss for contact detection (avoids orientation false negatives)
-        beam_pos = states.beam_poses.view(self.params.no_beams, -1)[:, 0:3]
+        # Position-only loss for contact/gripper detection — uses the same shifted grasp
+        # target so the gripper triggers when the arm reaches the actual grasp height.
         self._beam_pos_loss[0:self.params.no_beams] = self._mse_none(
-            beam_pos, states.left_pose[:3].repeat(self.params.no_beams, 1)).sum(dim=1)
+            grasp_target[:, 0:3], states.left_pose[:3].repeat(self.params.no_beams, 1)).sum(dim=1)
         self._beam_pos_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(
-            beam_pos, states.right_pose[:3].repeat(self.params.no_beams, 1)).sum(dim=1)
+            grasp_target[:, 0:3], states.right_pose[:3].repeat(self.params.no_beams, 1)).sum(dim=1)
         return
     
     def calc_prob(self):

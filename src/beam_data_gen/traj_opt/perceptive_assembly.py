@@ -282,7 +282,11 @@ class DualAssembly(TrajOptBase):
         self._active_pair_idx: Optional[int] = None
 
         # ---- Configurable safety knobs (preserved verbatim). ----
-        self.arm_z_floor: float = 0.65
+        # Match the IK z-limits enforced by frank_atls.py (_z_lims = [0.755, 1.00]).
+        # A mismatch means the planner routinely requests poses that hardware silently
+        # clips, causing the planner state to diverge from reality each cycle.
+        self.arm_z_floor: float = 0.755
+        self.arm_z_ceil:  float = 1.00
 
         # ---- Hole perception. MUST be set before optimise(). ----
         self._hole_positions: Optional[np.ndarray] = None
@@ -419,10 +423,18 @@ class DualAssembly(TrajOptBase):
                 self._states.beam_poses = self._states.beam_poses - self.params.step_size * gradients.beam_poses
                 self._states.pregrasp   = self._states.pregrasp   - self.params.step_size * gradients.pregrasp
 
-                # Hard z floor — never let the gradient drag arms underground.
+                # Hard z bounds — keep planner state inside the IK reachable envelope.
+                # arm_z_floor / arm_z_ceil should match frank_atls._z_lims exactly.
+                # Pregrasp z is also clamped: the 0.16 m offset above beam_z puts it at
+                # ~1.01 m which exceeds the IK ceiling of 1.00 m; clamp it so that
+                # pregrasp targets the gradient-optimized position the robot can reach.
                 with torch.no_grad():
-                    self._states.left_pose[2]  = torch.clamp(self._states.left_pose[2],  min=self.arm_z_floor)
-                    self._states.right_pose[2] = torch.clamp(self._states.right_pose[2], min=self.arm_z_floor)
+                    self._states.left_pose[2]  = torch.clamp(self._states.left_pose[2],
+                                                              min=self.arm_z_floor, max=self.arm_z_ceil)
+                    self._states.right_pose[2] = torch.clamp(self._states.right_pose[2],
+                                                              min=self.arm_z_floor, max=self.arm_z_ceil)
+                    self._states.pregrasp[:, 2] = torch.clamp(self._states.pregrasp[:, 2],
+                                                               min=self.arm_z_floor, max=self.arm_z_ceil)
 
                 self._states.detach()
 

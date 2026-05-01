@@ -288,16 +288,12 @@ class DualAssembly(TrajOptBase):
         self.arm_z_floor: float = 0.8
         self.arm_z_ceil:  float = 1.150
 
-        # Per-arm z and y workspace bounds.  Defaults mirror arm_z_floor / arm_z_ceil
+        # Per-arm z workspace bounds.  Defaults mirror arm_z_floor / arm_z_ceil
         # so existing callers are unaffected; override after construction as needed.
-        # y constraint: left EE is restricted to y <= left_y_max (robot left side),
-        # right EE is restricted to y >= right_y_min (robot right side).
         self.left_z_floor:  float = self.arm_z_floor
         self.left_z_ceil:   float = self.arm_z_ceil
         self.right_z_floor: float = self.arm_z_floor
         self.right_z_ceil:  float = self.arm_z_ceil
-        self.left_y_max:    float = 0.0   # left EE must stay at y <= 0
-        self.right_y_min:   float = 0.0   # right EE must stay at y >= 0
 
         # Maximum L2 displacement (metres) of the EE position per gradient step.
         # Prevents large gradients from flinging the planner state outside the
@@ -1026,23 +1022,19 @@ class DualAssembly(TrajOptBase):
         return delta
 
     def _clamp_ee_poses(self) -> None:
-        """Apply per-arm z and y workspace bounds to both EE poses in-place.
+        """Apply per-arm z workspace bounds to both EE poses in-place.
 
         Bounds applied (all configurable as instance attributes):
-        - Left EE:  z in [left_z_floor,  left_z_ceil],  y <= left_y_max
-        - Right EE: z in [right_z_floor, right_z_ceil], y >= right_y_min
-        - Pregrasp: z in [arm_z_floor,   arm_z_ceil]  (shared, no y constraint)
+        - Left EE:  z in [left_z_floor,  left_z_ceil]
+        - Right EE: z in [right_z_floor, right_z_ceil]
+        - Pregrasp: z in [arm_z_floor,   arm_z_ceil]  (shared)
 
         The pregrasp z clamp is kept here (rather than duplicating it at the
         call site) so all hard spatial bounds live in one place.
         """
         with torch.no_grad():
-            self._states.left_pose[1] = torch.clamp(
-                self._states.left_pose[1], max=self.left_y_max)
             self._states.left_pose[2] = torch.clamp(
                 self._states.left_pose[2], min=self.left_z_floor, max=self.left_z_ceil)
-            self._states.right_pose[1] = torch.clamp(
-                self._states.right_pose[1], min=self.right_y_min)
             self._states.right_pose[2] = torch.clamp(
                 self._states.right_pose[2], min=self.right_z_floor, max=self.right_z_ceil)
             self._states.pregrasp[:, 2] = torch.clamp(

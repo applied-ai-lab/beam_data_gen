@@ -320,6 +320,10 @@ class DualAssembly(TrajOptBase):
         # ---- FSM bookkeeping. ----
         self._state: State = State.GO_HOME
         self._state_step: int = 0      # steps spent in current state
+        # GO_HOME moves arms sequentially to avoid mid-path collisions when
+        # starting from arbitrary joint configurations.
+        # Phase 0 → park right arm; phase 1 → park left arm.
+        self._go_home_phase: int = 0
         self._slip_counter: int = 0    # consecutive slip steps (DUAL_ASSEMBLE)
         # Per-arm gripper command — flipped only by CLOSE_GRIPPER /
         # RELEASE_GRIPPER / RECOVERY_RELEASE. No hysteresis.
@@ -555,8 +559,9 @@ class DualAssembly(TrajOptBase):
             budget = (f"  budget={ASSEMBLE_TIMEOUT_STEPS - self._state_step}"
                       f"/{ASSEMBLE_TIMEOUT_STEPS}  slip={self._slip_counter}/{ASSEMBLE_SLIP_STEPS}")
         elif self._state == State.GO_HOME:
+            arm = "right" if self._go_home_phase == 0 else "left"
             budget = (f"  budget={GO_HOME_TIMEOUT_STEPS - self._state_step}"
-                      f"/{GO_HOME_TIMEOUT_STEPS} steps")
+                      f"/{GO_HOME_TIMEOUT_STEPS} steps  parking={arm}")
         else:
             budget = ""
 
@@ -727,6 +732,8 @@ class DualAssembly(TrajOptBase):
         """Centralised state transition — resets the per-state step counter."""
         self._state = new_state
         self._state_step = 0
+        if new_state == State.GO_HOME:
+            self._go_home_phase = 0
 
     # ------------------------------------------------------------------
     # PICK_TASK
@@ -828,16 +835,28 @@ class DualAssembly(TrajOptBase):
         return self._gradients
 
     def _grad_go_home(self) -> None:
-        """Drive each arm pose toward its start posture with a quadratic loss.
+        """Drive arms to start posture **sequentially**: right arm first, then left.
 
-        Mimics the implicit "start posture" influence of ``_start_loss`` in
-        ``dual_assembly.py:769-776`` but as an explicit driver rather than a
-        pair-selection bias.
+        Simultaneous movement from an arbitrary initial configuration can cause
+        mid-path collisions when the IK joint trajectories cross.  Moving one arm
+        at a time ensures the other is stationary and out of the way.
+
+        Phase 0: right arm only → when right is home, advance to phase 1.
+        Phase 1: left arm only.
         """
-        loss_l = ((self._states.left_pose  - self.left_start)  ** 2).sum()
-        loss_r = ((self._states.right_pose - self.right_start) ** 2).sum()
-        self._gradients.left_pose  = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
-        self._gradients.right_pose = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
+        right_home = float(((self._states.right_pose[:3] - self.right_start[:3]) ** 2).sum().sqrt()) < MOVE_UP_TOL
+
+        if self._go_home_phase == 0:
+            if right_home:
+                self._go_home_phase = 1
+            else:
+                loss_r = ((self._states.right_pose - self.right_start) ** 2).sum()
+                self._gradients.right_pose = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
+                return  # left arm gradient stays zero
+
+        # Phase 1: right is home, now park left arm.
+        loss_l = ((self._states.left_pose - self.left_start) ** 2).sum()
+        self._gradients.left_pose = grad(loss_l, self._states.left_pose, retain_graph=True)[0]
 
     def _grad_pregrasp(self) -> None:
         """Pull each arm to its pregrasp pose. Used by MOVE_TO_PREGRASP,

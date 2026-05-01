@@ -302,7 +302,7 @@ class DualAssembly(TrajOptBase):
         # Maximum L2 displacement (metres) of the EE position per gradient step.
         # Prevents large gradients from flinging the planner state outside the
         # workspace in a single step.  Set to float('inf') to disable.
-        self.max_ee_step: float = 0.02
+        self.max_ee_step: float = 0.01
 
         # Fixed z height the arms descend to in DESCENDING, regardless of the
         # perceived beam z.  Set to sit the gripper at beam surface height.

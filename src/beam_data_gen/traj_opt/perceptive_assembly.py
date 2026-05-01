@@ -288,6 +288,22 @@ class DualAssembly(TrajOptBase):
         self.arm_z_floor: float = 0.755
         self.arm_z_ceil:  float = 1.00
 
+        # Per-arm z and y workspace bounds.  Defaults mirror arm_z_floor / arm_z_ceil
+        # so existing callers are unaffected; override after construction as needed.
+        # y constraint: left EE is restricted to y <= left_y_max (robot left side),
+        # right EE is restricted to y >= right_y_min (robot right side).
+        self.left_z_floor:  float = self.arm_z_floor
+        self.left_z_ceil:   float = self.arm_z_ceil
+        self.right_z_floor: float = self.arm_z_floor
+        self.right_z_ceil:  float = self.arm_z_ceil
+        self.left_y_max:    float = 0.0   # left EE must stay at y <= 0
+        self.right_y_min:   float = 0.0   # right EE must stay at y >= 0
+
+        # Maximum L2 displacement (metres) of the EE position per gradient step.
+        # Prevents large gradients from flinging the planner state outside the
+        # workspace in a single step.  Set to float('inf') to disable.
+        self.max_ee_step: float = float('inf')
+
         # Fixed z height the arms descend to in DESCENDING, regardless of the
         # perceived beam z.  Set to sit the gripper at beam surface height.
         self.grasp_z: float = 0.81
@@ -426,24 +442,16 @@ class DualAssembly(TrajOptBase):
                 self._states.requires_grad()
                 gradients = self._step_gradients()
 
-                # Apply gradient.
-                self._states.left_pose  = self._states.left_pose  - self.params.step_size * gradients.left_pose
-                self._states.right_pose = self._states.right_pose - self.params.step_size * gradients.right_pose
+                # Apply gradient with per-arm velocity limiting.
+                delta_l = self._limit_ee_delta(self.params.step_size * gradients.left_pose)
+                delta_r = self._limit_ee_delta(self.params.step_size * gradients.right_pose)
+                self._states.left_pose  = self._states.left_pose  - delta_l
+                self._states.right_pose = self._states.right_pose - delta_r
                 self._states.beam_poses = self._states.beam_poses - self.params.step_size * gradients.beam_poses
                 self._states.pregrasp   = self._states.pregrasp   - self.params.step_size * gradients.pregrasp
 
-                # Hard z bounds — keep planner state inside the IK reachable envelope.
-                # arm_z_floor / arm_z_ceil should match frank_atls._z_lims exactly.
-                # Pregrasp z is also clamped: the 0.16 m offset above beam_z puts it at
-                # ~1.01 m which exceeds the IK ceiling of 1.00 m; clamp it so that
-                # pregrasp targets the gradient-optimized position the robot can reach.
-                with torch.no_grad():
-                    self._states.left_pose[2]  = torch.clamp(self._states.left_pose[2],
-                                                              min=self.arm_z_floor, max=self.arm_z_ceil)
-                    self._states.right_pose[2] = torch.clamp(self._states.right_pose[2],
-                                                              min=self.arm_z_floor, max=self.arm_z_ceil)
-                    self._states.pregrasp[:, 2] = torch.clamp(self._states.pregrasp[:, 2],
-                                                               min=self.arm_z_floor, max=self.arm_z_ceil)
+                # Enforce workspace bounds (z, y) for each arm plus pregrasp z.
+                self._clamp_ee_poses()
 
                 self._states.detach()
 
@@ -976,6 +984,50 @@ class DualAssembly(TrajOptBase):
         dl = float(((self._states.left_pose[:3]  - pl) ** 2).sum().sqrt())
         dr = float(((self._states.right_pose[:3] - pr) ** 2).sum().sqrt())
         return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
+
+    # ------------------------------------------------------------------
+    # EE constraint helpers
+    # ------------------------------------------------------------------
+
+    def _limit_ee_delta(self, delta: torch.Tensor) -> torch.Tensor:
+        """Clip the positional part of an EE gradient delta to max_ee_step.
+
+        Only the first three elements (x, y, z) are norm-limited; the yaw
+        channels (sin θ, cos θ) are left untouched so orientation updates are
+        not silently suppressed.  Returns a new tensor — does not modify
+        ``delta`` in-place.
+        """
+        if not np.isfinite(self.max_ee_step):
+            return delta
+        pos_norm = float(delta[:3].detach().norm())
+        if pos_norm > self.max_ee_step:
+            result = delta.clone()
+            result[:3] = delta[:3] * (self.max_ee_step / pos_norm)
+            return result
+        return delta
+
+    def _clamp_ee_poses(self) -> None:
+        """Apply per-arm z and y workspace bounds to both EE poses in-place.
+
+        Bounds applied (all configurable as instance attributes):
+        - Left EE:  z in [left_z_floor,  left_z_ceil],  y <= left_y_max
+        - Right EE: z in [right_z_floor, right_z_ceil], y >= right_y_min
+        - Pregrasp: z in [arm_z_floor,   arm_z_ceil]  (shared, no y constraint)
+
+        The pregrasp z clamp is kept here (rather than duplicating it at the
+        call site) so all hard spatial bounds live in one place.
+        """
+        with torch.no_grad():
+            self._states.left_pose[1] = torch.clamp(
+                self._states.left_pose[1], max=self.left_y_max)
+            self._states.left_pose[2] = torch.clamp(
+                self._states.left_pose[2], min=self.left_z_floor, max=self.left_z_ceil)
+            self._states.right_pose[1] = torch.clamp(
+                self._states.right_pose[1], min=self.right_y_min)
+            self._states.right_pose[2] = torch.clamp(
+                self._states.right_pose[2], min=self.right_z_floor, max=self.right_z_ceil)
+            self._states.pregrasp[:, 2] = torch.clamp(
+                self._states.pregrasp[:, 2], min=self.arm_z_floor, max=self.arm_z_ceil)
 
     # ------------------------------------------------------------------
     # Pose normalisation (z floor + yaw unit-circle projection).

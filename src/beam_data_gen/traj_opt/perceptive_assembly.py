@@ -285,8 +285,8 @@ class DualAssembly(TrajOptBase):
         # Match the IK z-limits enforced by frank_atls.py (_z_lims = [0.755, 1.00]).
         # A mismatch means the planner routinely requests poses that hardware silently
         # clips, causing the planner state to diverge from reality each cycle.
-        self.arm_z_floor: float = 0.755
-        self.arm_z_ceil:  float = 1.00
+        self.arm_z_floor: float = 0.8
+        self.arm_z_ceil:  float = 1.150
 
         # Per-arm z and y workspace bounds.  Defaults mirror arm_z_floor / arm_z_ceil
         # so existing callers are unaffected; override after construction as needed.
@@ -302,7 +302,7 @@ class DualAssembly(TrajOptBase):
         # Maximum L2 displacement (metres) of the EE position per gradient step.
         # Prevents large gradients from flinging the planner state outside the
         # workspace in a single step.  Set to float('inf') to disable.
-        self.max_ee_step: float = float('inf')
+        self.max_ee_step: float = 0.01
 
         # Fixed z height the arms descend to in DESCENDING, regardless of the
         # perceived beam z.  Set to sit the gripper at beam surface height.
@@ -1061,7 +1061,7 @@ class DualAssembly(TrajOptBase):
         """
         no_items = pose_torch.shape[0] // self.state_dim
         for k in range(no_items):
-            z_min = 0.021
+            z_min = 0.805
             if k < self._state_params.no_hands and self.arm_z_floor is not None:
                 z_min = max(z_min, self.arm_z_floor)
             pose_torch[self.state_dim * k + 2] = max(pose_torch[self.state_dim * k + 2], z_min)

@@ -20,7 +20,6 @@ _CONTACT_POS_THRESHOLD = 0.00005
 # Extra downward offset applied to the arm descent target relative to the perceived
 # beam position. Compensates for the AprilTag z being at the beam top surface while
 # the gripper needs to close around the beam body 2-3 cm lower.
-_GRASP_Z_DESCENT = 0.02
 # Number of consecutive cycles required before declaring beam convergence
 _CONVERGENCE_HYSTERESIS = 5
 
@@ -238,12 +237,6 @@ class HandLossesContacts(LossesContacts):
     def __init__(self, params):
         super().__init__(params)
 
-        # Per-arm extra z descent on top of the global _GRASP_Z_DESCENT.  Used to
-        # compensate for kinematic / mounting calibration offsets between the two
-        # arms (e.g. right arm needs to go ~2 cm lower to grasp at the same world z).
-        self.left_z_trim: float  = 0.0
-        self.right_z_trim: float = 0.0
-
         self._pregrasp_con = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         self._pregrasp_loss = torch.zeros(self.params.no_hands * self.params.no_beams).to(self.params.device)
         # Horizontal-only (x, y, sin, cos) pregrasp loss used for the pregrasp gate.
@@ -286,15 +279,9 @@ class HandLossesContacts(LossesContacts):
         self._pregrasp_horiz_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(
             pregrasp_horiz, states.right_pose[_horiz_idx].repeat(self.params.no_beams, 1)).sum(dim=1)
         
-        # Grasp target: beam position shifted down by _GRASP_Z_DESCENT so the arm
-        # descends below the AprilTag surface z to the actual graspable part of the beam.
-        # An additional per-arm z trim compensates for mounting/IK calibration offsets
-        # so the same world-frame target produces the same gripper height on both arms.
         beams_xyz = states.beam_poses.view(self.params.no_beams, -1).detach().clone()
         left_grasp_target  = beams_xyz.clone()
         right_grasp_target = beams_xyz.clone()
-        left_grasp_target[:, 2]  = beams_xyz[:, 2] - _GRASP_Z_DESCENT - self.left_z_trim
-        right_grasp_target[:, 2] = beams_xyz[:, 2] - _GRASP_Z_DESCENT - self.right_z_trim
 
         self._beam_loss[0:self.params.no_beams] = self._mse_none(
             left_grasp_target, states.left_pose.repeat(self.params.no_beams, 1)).sum(dim=1)
@@ -310,8 +297,7 @@ class HandLossesContacts(LossesContacts):
         self._beam_conver_loss = self._mse_none(states.beam_poses, states.beam_goal).sum(1)
         self._pregrasp_conver_loss = self._mse_none(states.pregrasp, states.pregrasp_goal).sum(1)
 
-        # Position-only loss for contact/gripper detection — uses the per-arm shifted
-        # grasp target so the gripper triggers when each arm reaches its own grasp height.
+        # Position-only loss for contact/gripper detection.
         self._beam_pos_loss[0:self.params.no_beams] = self._mse_none(
             left_grasp_target[:, 0:3], states.left_pose[:3].repeat(self.params.no_beams, 1)).sum(dim=1)
         self._beam_pos_loss[self.params.no_beams: 2 * self.params.no_beams] = self._mse_none(
@@ -405,13 +391,6 @@ class DualAssembly(TrajOptBase):
         # safety margin so the planner can never drive the arms underground.
         # Set to None to disable the limit.
         self.arm_z_floor: float = 0.65
-
-        # Per-arm grasp z trim (metres, additive to _GRASP_Z_DESCENT).  Compensates
-        # for kinematic / mounting calibration offsets so both arms grasp at the
-        # same world height.  Positive trim → arm descends further below the tag.
-        # Defaults: right arm 2 cm lower than left to cancel observed asymmetry.
-        self.left_z_trim: float  = 0.0
-        self.right_z_trim: float = 0.02
 
         # Last-cycle arm-to-beam commitment, used to keep the assignment sticky
         # across cycles so cost-flips don't make arms race across the workspace.
@@ -516,10 +495,6 @@ class DualAssembly(TrajOptBase):
             self.initialise(self.states)
         else:
             self.reset()
-
-        # Propagate per-arm grasp z trims into the loss bank for this cycle.
-        self._hand_losses.left_z_trim  = self.left_z_trim
-        self._hand_losses.right_z_trim = self.right_z_trim
 
         # Calc losses
         self._hand_losses.calc_losses(self._states)

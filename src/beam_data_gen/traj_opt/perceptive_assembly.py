@@ -112,13 +112,13 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 # dual_assembly.py where applicable; new gates have rationale in-line.
 # ---------------------------------------------------------------------------
 
-# Pregrasp gate: full 5-DOF MSE-sum on (x, y, z, sinθ, cosθ).
-# 0.01 ≈ 1 cm position OR ~5° yaw; the dominant component triggers the gate.
+# Pregrasp gate: per-axis max absolute error on (x, y, z). Rotation ignored.
+# Each of |dx|, |dy|, |dz| must be below this bound for the gate to fire.
 PREGRASP_TOL: float = 0.01
 
-# Grasp contact gate: position-only sum-of-squared-error, ~7 mm 3D radius.
-# Same as _CONTACT_POS_THRESHOLD in dual_assembly.py:19.
-GRASP_POS_TOL: float = 2.5e-5
+# Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
+# |dx|, |dy|, |dz| must be below this bound for the gate to fire.
+GRASP_POS_TOL: float = 0.005
 
 # Per-pair assembly convergence (Euclidean hole distance).
 HOLE_CONVERGENCE_THRESHOLD: float = 0.003
@@ -133,9 +133,9 @@ ASSEMBLE_SLIP_DIST: float = 0.05      # 5 cm
 ASSEMBLE_SLIP_STEPS: int  = 30
 
 # Per-state step budgets. The planner runs at ~30 Hz so 150 ≈ 5 s.
-DESCEND_TIMEOUT_STEPS:  int = 300
-ASSEMBLE_TIMEOUT_STEPS: int = 300
-GO_HOME_TIMEOUT_STEPS:  int = 300
+DESCEND_TIMEOUT_STEPS:  int = 100
+ASSEMBLE_TIMEOUT_STEPS: int = 100
+GO_HOME_TIMEOUT_STEPS:  int = 100
 
 # Position-only gate for MOVE_AWAY / RECOVERY_MOVE_UP (orientation ignored).
 MOVE_UP_TOL: float = 0.02
@@ -304,10 +304,20 @@ class DualAssembly(TrajOptBase):
         # perceived beam z.  Set to sit the gripper at beam surface height.
         self.grasp_z: float = 0.81
 
-        # Cached position-only losses vs. the fixed-z grasp target, updated each
-        # _grad_descending call and read by _grasp_contact.
-        self._descent_loss_l: float = float('inf')
-        self._descent_loss_r: float = float('inf')
+        # Inside this radius (m) of the descent target the gradient is replaced
+        # by one whose integrator step lands the planner state exactly on the
+        # target: g = (x - x*) / descent_snap_step_size. This bypasses the
+        # asymptotic shrinkage of a quadratic loss without overshoot or limit
+        # cycles. max_ee_step (above) still clips the per-step displacement,
+        # so motion remains smooth even if the diff is large.
+        # Set descent_snap_radius to 0.0 to disable (vanilla quadratic descent).
+        self.descent_snap_radius:    float = 0.02
+        self.descent_snap_step_size: float = 0.1
+
+        # Cached per-axis max absolute (x, y, z) error vs. the fixed-z grasp
+        # target, updated each _grad_descending call and read by _grasp_contact.
+        self._descent_max_axis_err_l: float = float('inf')
+        self._descent_max_axis_err_r: float = float('inf')
 
         # ---- Hole perception. MUST be set before optimise(). ----
         self._hole_positions: Optional[np.ndarray] = None
@@ -609,14 +619,16 @@ class DualAssembly(TrajOptBase):
             _log(f"  L_ee=[{lp[0]:.3f},{lp[1]:.3f},{lp[2]:.3f}]"
                  f"  R_ee=[{rp[0]:.3f},{rp[1]:.3f},{rp[2]:.3f}]")
 
-            l_preg = float(hl._pregrasp_loss[li])
-            r_preg = float(hl._pregrasp_loss[n + ri])
-            l_beam = float(hl._beam_pos_loss[li])
-            r_beam = float(hl._beam_pos_loss[n + ri])
-            _log(f"  pregrasp_loss: L={l_preg:.2e}  R={r_preg:.2e}"
-                 f"  [gate<{PREGRASP_TOL:.0e}]")
-            _log(f"  beam_pos_loss: L={l_beam:.2e}  R={r_beam:.2e}"
-                 f"  [grasp_gate<{GRASP_POS_TOL:.0e}]")
+            pl = self._states.pregrasp[li, :3].detach().cpu().numpy()
+            pr = self._states.pregrasp[ri, :3].detach().cpu().numpy()
+            l_preg_axis = float(np.max(np.abs(lp - pl)))
+            r_preg_axis = float(np.max(np.abs(rp - pr)))
+            l_grasp_axis = self._descent_max_axis_err_l
+            r_grasp_axis = self._descent_max_axis_err_r
+            _log(f"  pregrasp_xyz_max_err: L={l_preg_axis*1e3:.1f}mm  R={r_preg_axis*1e3:.1f}mm"
+                 f"  [gate<{PREGRASP_TOL*1e3:.0f}mm]")
+            _log(f"  grasp_xyz_max_err:    L={l_grasp_axis*1e3:.1f}mm  R={r_grasp_axis*1e3:.1f}mm"
+                 f"  [gate<{GRASP_POS_TOL*1e3:.0f}mm]")
 
     # ------------------------------------------------------------------
     # Transition evaluation — split into idle (pre-rollout) and step
@@ -875,15 +887,36 @@ class DualAssembly(TrajOptBase):
         loss_l = ((self._states.left_pose  - left_target)  ** 2).sum()
         loss_r = ((self._states.right_pose - right_target) ** 2).sum()
 
-        # Position-only (x, y, z) cache for the contact gate.
+        # Per-axis (x, y, z) cache for the contact gate. We also retain the
+        # Euclidean distance for the snap branch below.
         with torch.no_grad():
-            self._descent_loss_l = float(
-                ((self._states.left_pose[:3]  - left_target[:3])  ** 2).sum())
-            self._descent_loss_r = float(
-                ((self._states.right_pose[:3] - right_target[:3]) ** 2).sum())
+            diff_l = (self._states.left_pose[:3]  - left_target[:3]).abs()
+            diff_r = (self._states.right_pose[:3] - right_target[:3]).abs()
+            self._descent_max_axis_err_l = float(diff_l.max())
+            self._descent_max_axis_err_r = float(diff_r.max())
+            dist_l = float((diff_l ** 2).sum() ** 0.5)
+            dist_r = float((diff_r ** 2).sum() ** 0.5)
 
-        self._gradients.left_pose  = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
-        self._gradients.right_pose = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
+        g_l = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
+        g_r = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
+
+        # Snap: inside descent_snap_radius replace the quadratic gradient with
+        # one whose integrator step lands the planner state exactly on the
+        # target.  delta = descent_snap_step_size · g  →
+        # set g = (x - x*) / descent_snap_step_size  so delta = (x - x*) and
+        # x_new = x - delta = x*.  max_ee_step still clips the result if it
+        # would exceed the per-step displacement cap.
+        snap_r  = self.descent_snap_radius
+        step_sz = self.descent_snap_step_size
+        if snap_r > 0.0 and step_sz > 0.0:
+            with torch.no_grad():
+                if 0.0 < dist_l < snap_r:
+                    g_l = (self._states.left_pose  - left_target).detach()  / step_sz
+                if 0.0 < dist_r < snap_r:
+                    g_r = (self._states.right_pose - right_target).detach() / step_sz
+
+        self._gradients.left_pose  = g_l
+        self._gradients.right_pose = g_r
 
     def _grad_dual_assemble(self) -> None:
         """Beam-goal + hole-collinearity gradient, contact-blended onto EEs.
@@ -936,24 +969,25 @@ class DualAssembly(TrajOptBase):
         return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
 
     def _pregrasp_reached_5dof(self) -> bool:
-        """Full 5-DOF pregrasp gate (x, y, z, sinθ, cosθ)."""
+        """Per-axis (x, y, z) pregrasp gate; rotation ignored."""
         if self._left_index is None or self._right_index is None:
             return False
-        n_beams = self._state_params.no_beams
-        l = float(self._hand_losses._pregrasp_loss[self._left_index])
-        r = float(self._hand_losses._pregrasp_loss[n_beams + self._right_index])
+        pl = self._states.pregrasp[self._left_index, :3]
+        pr = self._states.pregrasp[self._right_index, :3]
+        l = float((self._states.left_pose[:3]  - pl).abs().max())
+        r = float((self._states.right_pose[:3] - pr).abs().max())
         return l < PREGRASP_TOL and r < PREGRASP_TOL
 
     def _grasp_contact(self) -> bool:
-        """Both arms within GRASP_POS_TOL of their fixed-z descent target.
-
-        Uses ``_descent_loss_l / _r`` (cached by ``_grad_descending``) rather than
-        ``_beam_pos_loss`` (which measures distance to the raw perceived beam z).
-        Without this, the gate would never fire when grasp_z ≠ beam z.
+        """Both arms within GRASP_POS_TOL of their fixed-z descent target on
+        every axis (x, y, z) independently. Uses per-axis max errors cached by
+        ``_grad_descending`` against the fixed-z target rather than the raw
+        perceived beam z (so the gate fires correctly when grasp_z ≠ beam z).
         """
         if self._left_index is None or self._right_index is None:
             return False
-        return self._descent_loss_l < GRASP_POS_TOL and self._descent_loss_r < GRASP_POS_TOL
+        return (self._descent_max_axis_err_l < GRASP_POS_TOL
+                and self._descent_max_axis_err_r < GRASP_POS_TOL)
 
     def _ee_slipped_from_beams(self) -> bool:
         """Distance between each EE and its assigned beam position; if either

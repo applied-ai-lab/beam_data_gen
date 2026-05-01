@@ -318,6 +318,10 @@ class DualAssembly(TrajOptBase):
         # target, updated each _grad_descending call and read by _grasp_contact.
         self._descent_max_axis_err_l: float = float('inf')
         self._descent_max_axis_err_r: float = float('inf')
+        # Position-only Euclidean distance to the fixed-z grasp target. Read by
+        # frank_atls.publish_planner_diagnostics for ROS diagnostics output.
+        self._descent_loss_l: float = float('inf')
+        self._descent_loss_r: float = float('inf')
 
         # ---- Hole perception. MUST be set before optimise(). ----
         self._hole_positions: Optional[np.ndarray] = None
@@ -896,6 +900,8 @@ class DualAssembly(TrajOptBase):
             self._descent_max_axis_err_r = float(diff_r.max())
             dist_l = float((diff_l ** 2).sum() ** 0.5)
             dist_r = float((diff_r ** 2).sum() ** 0.5)
+            self._descent_loss_l = dist_l
+            self._descent_loss_r = dist_r
 
         g_l = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
         g_r = grad(loss_r, self._states.right_pose, retain_graph=True)[0]

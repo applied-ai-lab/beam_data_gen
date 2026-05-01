@@ -47,9 +47,9 @@ State machine
 User-directed deviations from PERCEPTIVE_ASSEMBLY.MD
 ----------------------------------------------------
 
-1. **Fixed arm-to-beam assignment.** For the active pair ``(a, b)``,
-   ``right_index = min(a, b)``, ``left_index = max(a, b)``. Computed once on
-   entry to ``PICK_TASK``; never reshuffled mid-attempt.
+1. **Fixed arm-to-beam assignment.** Right arm always handles odd-indexed
+   beams (1, 3); left arm always handles even-indexed beams (0, 2).
+   Computed once on entry to ``PICK_TASK``; never reshuffled mid-attempt.
 2. **Pregrasp gate uses full 5-DOF distance** (x, y, z, sinθ, cosθ), gated by
    ``PREGRASP_TOL`` as a single MSE-sum bound.
 3. **Convergence is touched only in PICK_TASK and DUAL_ASSEMBLE.** No
@@ -287,6 +287,15 @@ class DualAssembly(TrajOptBase):
         # clips, causing the planner state to diverge from reality each cycle.
         self.arm_z_floor: float = 0.755
         self.arm_z_ceil:  float = 1.00
+
+        # Fixed z height the arms descend to in DESCENDING, regardless of the
+        # perceived beam z.  Set to sit the gripper at beam surface height.
+        self.grasp_z: float = 0.81
+
+        # Cached position-only losses vs. the fixed-z grasp target, updated each
+        # _grad_descending call and read by _grasp_contact.
+        self._descent_loss_l: float = float('inf')
+        self._descent_loss_r: float = float('inf')
 
         # ---- Hole perception. MUST be set before optimise(). ----
         self._hole_positions: Optional[np.ndarray] = None
@@ -742,9 +751,14 @@ class DualAssembly(TrajOptBase):
 
         self._active_pair_idx = pair_idx
         a, b = self._hole_pairs[pair_idx]
-        # Fixed mapping: right always handles the lower beam-index.
-        self._right_index = min(a, b)
-        self._left_index  = max(a, b)
+        # Fixed mapping: right always handles odd-indexed beams (1, 3),
+        # left always handles even-indexed beams (0, 2).
+        if a % 2 == 1:
+            self._right_index = a
+            self._left_index  = b
+        else:
+            self._right_index = b
+            self._left_index  = a
         self._goto(State.MOVE_TO_PREGRASP)
 
     def _select_pair(self) -> Optional[int]:
@@ -836,16 +850,39 @@ class DualAssembly(TrajOptBase):
         self._gradients.pregrasp = grad(pg_loss, self._states.pregrasp, retain_graph=True)[0]
 
     def _grad_descending(self) -> None:
-        """Drive each arm to its grasp target (beam pose minus z descent).
+        """Drive each arm to its grasp target: beam (x, y, yaw) at fixed ``self.grasp_z``.
 
-        Uses the per-arm shifted target already computed inside
-        ``HandLossesContacts.calc_losses`` (``_beam_loss``).
+        The target z is ``self.grasp_z`` (default 0.81 m), regardless of the perceived
+        beam z.  This makes the descent deterministic — the arm always ends at the same
+        height — and avoids relying on the AprilTag z estimate, which is the noisiest
+        component of the pose.
+
+        We also cache the position-only squared distance to the fixed-z target in
+        ``_descent_loss_l / _descent_loss_r`` so that ``_grasp_contact`` can gate on
+        the *correct* target rather than the raw beam z.
         """
         if self._left_index is None or self._right_index is None:
             return
-        n_beams = self._state_params.no_beams
-        loss_l = self._hand_losses._beam_loss[self._left_index]
-        loss_r = self._hand_losses._beam_loss[n_beams + self._right_index]
+
+        def _target(beam_idx: int) -> torch.Tensor:
+            """Beam pose with z replaced by self.grasp_z (detached — not optimised)."""
+            t = self._states.beam_poses[beam_idx].detach().clone()
+            t[2] = self.grasp_z
+            return t
+
+        left_target  = _target(self._left_index)
+        right_target = _target(self._right_index)
+
+        loss_l = ((self._states.left_pose  - left_target)  ** 2).sum()
+        loss_r = ((self._states.right_pose - right_target) ** 2).sum()
+
+        # Position-only (x, y, z) cache for the contact gate.
+        with torch.no_grad():
+            self._descent_loss_l = float(
+                ((self._states.left_pose[:3]  - left_target[:3])  ** 2).sum())
+            self._descent_loss_r = float(
+                ((self._states.right_pose[:3] - right_target[:3]) ** 2).sum())
+
         self._gradients.left_pose  = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
         self._gradients.right_pose = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
 
@@ -882,8 +919,13 @@ class DualAssembly(TrajOptBase):
 
         # Drive each arm with the beam gradient of its assigned beam — the
         # arm is grasped, so the beam moves with the EE.
-        self._gradients.left_pose  = beam_grad[self._left_index]
-        self._gradients.right_pose = beam_grad[self._right_index]
+        # Zero the z component: arms stay at grasp_z throughout assembly.
+        left_g  = beam_grad[self._left_index].clone()
+        right_g = beam_grad[self._right_index].clone()
+        left_g[2]  = 0.0
+        right_g[2] = 0.0
+        self._gradients.left_pose  = left_g
+        self._gradients.right_pose = right_g
 
     # ------------------------------------------------------------------
     # Gates — small predicates on the latest losses.
@@ -904,12 +946,15 @@ class DualAssembly(TrajOptBase):
         return l < PREGRASP_TOL and r < PREGRASP_TOL
 
     def _grasp_contact(self) -> bool:
+        """Both arms within GRASP_POS_TOL of their fixed-z descent target.
+
+        Uses ``_descent_loss_l / _r`` (cached by ``_grad_descending``) rather than
+        ``_beam_pos_loss`` (which measures distance to the raw perceived beam z).
+        Without this, the gate would never fire when grasp_z ≠ beam z.
+        """
         if self._left_index is None or self._right_index is None:
             return False
-        n_beams = self._state_params.no_beams
-        l = float(self._hand_losses._beam_pos_loss[self._left_index])
-        r = float(self._hand_losses._beam_pos_loss[n_beams + self._right_index])
-        return l < GRASP_POS_TOL and r < GRASP_POS_TOL
+        return self._descent_loss_l < GRASP_POS_TOL and self._descent_loss_r < GRASP_POS_TOL
 
     def _ee_slipped_from_beams(self) -> bool:
         """Distance between each EE and its assigned beam position; if either

@@ -114,14 +114,14 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
 # Pregrasp gate: per-axis max absolute error on (x, y, z). Rotation ignored.
 # Each of |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-PREGRASP_TOL: float = 0.01
+PREGRASP_TOL: float = 0.05
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
 GRASP_POS_TOL: float = 0.005
 
 # Per-pair assembly convergence (Euclidean hole distance).
-HOLE_CONVERGENCE_THRESHOLD: float = 0.003
+HOLE_CONVERGENCE_THRESHOLD: float = 0.005
 
 # Cycles a pair must stay below the hole threshold before being latched.
 CONVERGENCE_HYSTERESIS: int = 5
@@ -138,12 +138,17 @@ ASSEMBLE_TIMEOUT_STEPS: int = 100
 GO_HOME_TIMEOUT_STEPS:  int = 100
 
 # Position-only gate for MOVE_AWAY / RECOVERY_MOVE_UP (orientation ignored).
-MOVE_UP_TOL: float = 0.02
+MOVE_UP_TOL: float = 0.05
 
 # Gradient mixing — kept identical to dual_assembly.py for behavioural parity
 # in the assembly phase.
 HOLE_GRADIENT_WEIGHT: float = 0.3
 YAW_GRADIENT_WEIGHT:  float = 1.0
+
+# Gradient-descent learning rate. Hard-coded here (instead of read from
+# TrajOptParams.step_size) so the planner's integrator step is fixed by the
+# module rather than by callers.
+LEARNING_RATE: float = 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -306,13 +311,12 @@ class DualAssembly(TrajOptBase):
 
         # Inside this radius (m) of the descent target the gradient is replaced
         # by one whose integrator step lands the planner state exactly on the
-        # target: g = (x - x*) / descent_snap_step_size. This bypasses the
-        # asymptotic shrinkage of a quadratic loss without overshoot or limit
-        # cycles. max_ee_step (above) still clips the per-step displacement,
-        # so motion remains smooth even if the diff is large.
+        # target: g = (x - x*) / LEARNING_RATE. This bypasses the asymptotic
+        # shrinkage of a quadratic loss without overshoot or limit cycles.
+        # max_ee_step (above) still clips the per-step displacement, so motion
+        # remains smooth even if the diff is large.
         # Set descent_snap_radius to 0.0 to disable (vanilla quadratic descent).
         self.descent_snap_radius:    float = 0.02
-        self.descent_snap_step_size: float = 0.1
 
         # Cached per-axis max absolute (x, y, z) error vs. the fixed-z grasp
         # target, updated each _grad_descending call and read by _grasp_contact.
@@ -453,12 +457,12 @@ class DualAssembly(TrajOptBase):
                 gradients = self._step_gradients()
 
                 # Apply gradient with per-arm velocity limiting.
-                delta_l = self._limit_ee_delta(self.params.step_size * gradients.left_pose)
-                delta_r = self._limit_ee_delta(self.params.step_size * gradients.right_pose)
+                delta_l = self._limit_ee_delta(LEARNING_RATE * gradients.left_pose)
+                delta_r = self._limit_ee_delta(LEARNING_RATE * gradients.right_pose)
                 self._states.left_pose  = self._states.left_pose  - delta_l
                 self._states.right_pose = self._states.right_pose - delta_r
-                self._states.beam_poses = self._states.beam_poses - self.params.step_size * gradients.beam_poses
-                self._states.pregrasp   = self._states.pregrasp   - self.params.step_size * gradients.pregrasp
+                self._states.beam_poses = self._states.beam_poses - LEARNING_RATE * gradients.beam_poses
+                self._states.pregrasp   = self._states.pregrasp   - LEARNING_RATE * gradients.pregrasp
 
                 # Enforce workspace bounds (z, y) for each arm plus pregrasp z.
                 self._clamp_ee_poses()
@@ -908,18 +912,17 @@ class DualAssembly(TrajOptBase):
 
         # Snap: inside descent_snap_radius replace the quadratic gradient with
         # one whose integrator step lands the planner state exactly on the
-        # target.  delta = descent_snap_step_size · g  →
-        # set g = (x - x*) / descent_snap_step_size  so delta = (x - x*) and
+        # target.  delta = LEARNING_RATE · g  →
+        # set g = (x - x*) / LEARNING_RATE  so delta = (x - x*) and
         # x_new = x - delta = x*.  max_ee_step still clips the result if it
         # would exceed the per-step displacement cap.
-        snap_r  = self.descent_snap_radius
-        step_sz = self.descent_snap_step_size
-        if snap_r > 0.0 and step_sz > 0.0:
+        snap_r = self.descent_snap_radius
+        if snap_r > 0.0 and LEARNING_RATE > 0.0:
             with torch.no_grad():
                 if 0.0 < dist_l < snap_r:
-                    g_l = (self._states.left_pose  - left_target).detach()  / step_sz
+                    g_l = (self._states.left_pose  - left_target).detach()  / LEARNING_RATE
                 if 0.0 < dist_r < snap_r:
-                    g_r = (self._states.right_pose - right_target).detach() / step_sz
+                    g_r = (self._states.right_pose - right_target).detach() / LEARNING_RATE
 
         self._gradients.left_pose  = g_l
         self._gradients.right_pose = g_r

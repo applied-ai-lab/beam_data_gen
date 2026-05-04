@@ -165,7 +165,7 @@ ASSEMBLE_SNAP_RADIUS: float = 0.02
 # Per-pair Euclidean (xy) tolerance for pin insertion convergence — the
 # "8 mm regrasp loop": below this, RELEASE_PIN may fire; above it, the
 # planner forces a recovery + regrasp instead of releasing.
-PIN_INSERT_TOL: float = 0.008
+PIN_INSERT_TOL: float = 0.01
 
 # Cycles the pin must remain inside PIN_INSERT_TOL before RELEASE_PIN fires.
 PIN_CONVERGENCE_HYSTERESIS: int = 5

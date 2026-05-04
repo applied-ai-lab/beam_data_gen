@@ -151,6 +151,12 @@ YAW_GRADIENT_WEIGHT:  float = 0.8
 # module rather than by callers.
 LEARNING_RATE: float = 0.3
 
+# Snap radii (metres). Inside the radius the per-state gradient is replaced
+# by one whose integrator step lands exactly on the target, bypassing the
+# asymptotic shrinkage of a quadratic loss. Set to 0.0 to disable.
+DESCENT_SNAP_RADIUS:  float = 0.04
+ASSEMBLE_SNAP_RADIUS: float = 0.04
+
 
 # ---------------------------------------------------------------------------
 # State enum
@@ -310,14 +316,10 @@ class DualAssembly(TrajOptBase):
         # perceived beam z.  Set to sit the gripper at beam surface height.
         self.grasp_z: float = 0.793 #UNUSED NOW
 
-        # Inside this radius (m) of the descent target the gradient is replaced
-        # by one whose integrator step lands the planner state exactly on the
-        # target: g = (x - x*) / LEARNING_RATE. This bypasses the asymptotic
-        # shrinkage of a quadratic loss without overshoot or limit cycles.
-        # max_ee_step (above) still clips the per-step displacement, so motion
-        # remains smooth even if the diff is large.
-        # Set descent_snap_radius to 0.0 to disable (vanilla quadratic descent).
-        self.descent_snap_radius:    float = 0.04
+        # Per-beam flag (last DUAL_ASSEMBLE call) and cumulative count of
+        # assemble-snap activations. See ASSEMBLE_SNAP_RADIUS at top of module.
+        self._assemble_snap_fired: List[bool] = [False] * self._state_params.no_beams
+        self._assemble_snap_count: int = 0
 
         # Cached per-axis max absolute (x, y, z) error vs. the fixed-z grasp
         # target, updated each _grad_descending call and read by _grasp_contact.
@@ -753,7 +755,12 @@ class DualAssembly(TrajOptBase):
             self._active_pair_idx = None
             self._left_index = None
             self._right_index = None
-            self._goto(State.DONE)
+            # Drive arms back to start posture before idling so they do not
+            # drift away while waiting in DONE. If already home, idle directly.
+            if self._home_reached():
+                self._goto(State.DONE)
+            else:
+                self._goto(State.GO_HOME)
             return
 
         self._active_pair_idx = pair_idx
@@ -911,7 +918,7 @@ class DualAssembly(TrajOptBase):
         # bypass them here.
         self._descent_snap_fired_l = False
         self._descent_snap_fired_r = False
-        snap_r = self.descent_snap_radius
+        snap_r = DESCENT_SNAP_RADIUS
         if snap_r > 0.0 and LEARNING_RATE > 0.0:
             with torch.no_grad():
                 if 0.0 < dist_l < snap_r:
@@ -954,6 +961,31 @@ class DualAssembly(TrajOptBase):
         # free to ignore them.
         for k in self._convergence:
             beam_grad[k] *= 0.0
+
+        # Snap: inside assemble_snap_radius (xy distance to beam_goal) replace
+        # the quadratic gradient with one whose integrator step lands the beam
+        # state on the goal — same trick as ``_grad_descending``. Only the
+        # active pair's beams are eligible; converged beams are skipped (their
+        # gradient is already zero and we don't want to disturb them).
+        self._assemble_snap_fired = [False] * self._state_params.no_beams
+        snap_r = ASSEMBLE_SNAP_RADIUS
+        if snap_r > 0.0 and LEARNING_RATE > 0.0:
+            active = ()
+            if self._active_pair_idx is not None:
+                active = self._hole_pairs[self._active_pair_idx]
+            with torch.no_grad():
+                for k in active:
+                    if k in self._convergence:
+                        continue
+                    diff_xy = self._states.beam_poses[k, :2] - self._states.beam_goal[k, :2]
+                    dist_xy = float((diff_xy ** 2).sum() ** 0.5)
+                    if 0.0 < dist_xy < snap_r:
+                        snap_g = (
+                            self._states.beam_poses[k] - self._states.beam_goal[k]
+                        ).detach() / LEARNING_RATE
+                        beam_grad[k] = snap_g
+                        self._assemble_snap_fired[k] = True
+                        self._assemble_snap_count += 1
 
         self._gradients.beam_poses = beam_grad
 

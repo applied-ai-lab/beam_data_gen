@@ -114,10 +114,11 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 # Pregrasp gate: per-axis max absolute error on (x, y, z). Rotation ignored.
 # Each of |dx|, |dy|, |dz| must be below this bound for the gate to fire.
 PREGRASP_TOL: float = 0.02
+MOVE_UP_Z: float = 1.0
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-GRASP_POS_TOL: float = 0.008
+GRASP_POS_TOL: float = 0.01
 
 # Per-pair assembly convergence (Euclidean hole distance).
 HOLE_CONVERGENCE_THRESHOLD: float = 0.003
@@ -132,7 +133,7 @@ ASSEMBLE_SLIP_DIST: float = 0.03      # 5 cm
 ASSEMBLE_SLIP_STEPS: int  = 15
 
 # Per-state step budgets. The planner runs at ~30 Hz so 150 ≈ 5 s.
-DESCEND_TIMEOUT_STEPS:  int = 100
+DESCEND_TIMEOUT_STEPS:  int = 35
 ASSEMBLE_TIMEOUT_STEPS: int = 100
 GO_HOME_TIMEOUT_STEPS:  int = 100
 
@@ -147,7 +148,7 @@ YAW_GRADIENT_WEIGHT:  float = 1.0
 # Gradient-descent learning rate. Hard-coded here (instead of read from
 # TrajOptParams.step_size) so the planner's integrator step is fixed by the
 # module rather than by callers.
-LEARNING_RATE: float = 0.3
+LEARNING_RATE: float = 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +316,7 @@ class DualAssembly(TrajOptBase):
         # max_ee_step (above) still clips the per-step displacement, so motion
         # remains smooth even if the diff is large.
         # Set descent_snap_radius to 0.0 to disable (vanilla quadratic descent).
-        self.descent_snap_radius:    float = 0.03
+        self.descent_snap_radius:    float = 0.04
 
         # Cached per-axis max absolute (x, y, z) error vs. the fixed-z grasp
         # target, updated each _grad_descending call and read by _grasp_contact.
@@ -709,11 +710,11 @@ class DualAssembly(TrajOptBase):
                 self._evaluate_idle_transitions()
 
         elif self._state == State.RECOVERY_MOVE_UP:
-            if self._move_up_reached():
+            if self._lift_reached():
                 self._goto(State.MOVE_TO_PREGRASP)
 
         elif self._state == State.MOVE_AWAY:
-            if self._move_up_reached():
+            if self._lift_reached():
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
 
@@ -821,6 +822,8 @@ class DualAssembly(TrajOptBase):
             self._grad_go_home()
         elif s in (State.MOVE_TO_PREGRASP, State.RECOVERY_MOVE_UP, State.MOVE_AWAY):
             self._grad_pregrasp()
+        elif s in (State.RECOVERY_MOVE_UP,State.MOVE_AWAY):
+            self._grad_lift()
         elif s == State.DESCENDING:
             self._grad_descending()
         elif s == State.DUAL_ASSEMBLE:
@@ -835,6 +838,14 @@ class DualAssembly(TrajOptBase):
         loss_r = ((self._states.right_pose - self.right_start) ** 2).sum()
         self._gradients.left_pose  = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
         self._gradients.right_pose = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
+
+    def _grad_lift(self) -> None:
+        """Pull up each arm to a predefined height, this does not require knowing the beam positions"""
+        z_target = torch.tensor(MOVE_UP_Z, dtype=torch.float32, device=self.params.device)
+        loss_l = (self._states.left_pose[2]-z_target)**2
+        loss_r = (self._states.right_pose[2]-z_target)**2
+        self._gradients.left_pose = grad(loss_l,self._states.left_pose, retain_graph=True)[0]
+        self._gradients.right_pose = grad(loss_r,self._states.right_pose, retain_graph=True)[0]
 
     def _grad_pregrasp(self) -> None:
         """Pull each arm to its pregrasp pose. Used by MOVE_TO_PREGRASP,
@@ -958,6 +969,11 @@ class DualAssembly(TrajOptBase):
     # ------------------------------------------------------------------
     # Gates — small predicates on the latest losses.
     # ------------------------------------------------------------------
+
+    def _lift_reached(self) -> bool:
+        dl = abs(float(self._states.left_pose[2]-MOVE_UP_Z))
+        dr = abs(float(self._states.right_pose[2]-MOVE_UP_Z))
+        return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
 
     def _home_reached(self) -> bool:
         dl = float(((self._states.left_pose[:3]  - self.left_start[:3])  ** 2).sum().sqrt())

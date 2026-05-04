@@ -740,20 +740,6 @@ class DualAssembly(TrajOptBase):
             # drifted beam (see PERCEPTIVE_ASSEMBLY.MD §10.8).
             if self._pin_phase_active:
                 return
-            # Re-check pin-phase entry every cycle.  ``_enter_pick_task``
-            # may have landed us in DONE before pin TFs were available
-            # (e.g. PTU still at HOME, AprilTag detector not yet seeing
-            # the pins).  If they have since arrived, forward into pin
-            # phase.  Without this, the FSM gets stuck in DONE because
-            # ``_select_pair`` will never return non-None for a fully
-            # converged set of beams.
-            if (self._pin_positions is not None
-                    and self._pin_inserted
-                    and not all(self._pin_inserted)):
-                self._pin_phase_active = True
-                self._pin_phase_entry_counter = self._pin_update_counter
-                self._goto(State.STOW_RIGHT)
-                return
             if self._select_pair() is not None:
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
@@ -952,26 +938,19 @@ class DualAssembly(TrajOptBase):
             self._active_pair_idx = None
             self._left_index = None
             self._right_index = None
-            # If pin positions have been provided and there is at least
-            # one pin still to place, latch into pin phase. Otherwise
-            # fall back to the original drive-home-then-idle behaviour.
-            if (self._pin_positions is not None
-                    and not all(self._pin_inserted)
-                    and self._pin_inserted):  # non-empty → at least one pin known
-                self._pin_phase_active = True
-                # Snapshot the current pin-update counter; STOW_RIGHT must
-                # wait for a fresh pin observation (counter strictly greater)
-                # before progressing — otherwise we'd act on coordinates
-                # cached from before the PTU was commanded to PIN_VIEW.
-                self._pin_phase_entry_counter = self._pin_update_counter
-                self._goto(State.STOW_RIGHT)
-                return
-            # Drive arms back to start posture before idling so they do not
-            # drift away while waiting in DONE. If already home, idle directly.
-            if self._home_reached():
-                self._goto(State.DONE)
-            else:
-                self._goto(State.GO_HOME)
+            # Beams done → pin phase, unconditionally.  We do *not* require
+            # that pin TFs have already been observed: the PTU is parked at
+            # HOME during beam phase, so pins are typically out of FOV at
+            # this exact moment.  STOW_RIGHT parks the right arm at
+            # right_start (which also frees the PTU command, see
+            # FrankAtls.publish_planner_diagnostics → PTU goes to PIN_VIEW)
+            # and waits for a fresh pin observation via the
+            # ``_pin_phase_entry_counter`` gate before advancing to
+            # PICK_PIN.  The left arm holds during STOW_RIGHT, so it cannot
+            # move toward a pin it has never seen.
+            self._pin_phase_active = True
+            self._pin_phase_entry_counter = self._pin_update_counter
+            self._goto(State.STOW_RIGHT)
             return
 
         self._active_pair_idx = pair_idx

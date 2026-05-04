@@ -740,6 +740,20 @@ class DualAssembly(TrajOptBase):
             # drifted beam (see PERCEPTIVE_ASSEMBLY.MD §10.8).
             if self._pin_phase_active:
                 return
+            # Re-check pin-phase entry every cycle.  ``_enter_pick_task``
+            # may have landed us in DONE before pin TFs were available
+            # (e.g. PTU still at HOME, AprilTag detector not yet seeing
+            # the pins).  If they have since arrived, forward into pin
+            # phase.  Without this, the FSM gets stuck in DONE because
+            # ``_select_pair`` will never return non-None for a fully
+            # converged set of beams.
+            if (self._pin_positions is not None
+                    and self._pin_inserted
+                    and not all(self._pin_inserted)):
+                self._pin_phase_active = True
+                self._pin_phase_entry_counter = self._pin_update_counter
+                self._goto(State.STOW_RIGHT)
+                return
             if self._select_pair() is not None:
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()

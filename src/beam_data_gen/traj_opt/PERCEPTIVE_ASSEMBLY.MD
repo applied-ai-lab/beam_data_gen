@@ -8,6 +8,15 @@ constructor signature and public API (`optimise()`, `set_hole_positions()`,
 replaces the implicit gradient/contact-gate blend with an **explicit finite
 state machine** wrapping per-state gradient-based local controllers.
 
+The planner runs in two sequential phases:
+
+1. **Beam phase** (§1–§5) — bimanual perceptive assembly of beams into
+   converged hole-pairs.
+2. **Pin phase** (§10) — single-arm pin insertion into each converged
+   hole-pair midpoint. Right arm is parked at `right_start` for the
+   entire phase. Entered automatically when all beam pairs are converged;
+   one-way (PICK_TASK is locked the moment pin phase is entered).
+
 This file is the spec the code in `perceptive_assembly.py` actually
 implements. The earlier "originally proposed" sketch (sticky 2×2 assignment,
 MSE-sum gates, gripper hysteresis, etc.) is not what was built; deliberate
@@ -82,6 +91,12 @@ All units SI (m, rad). These are module-level constants in
 | `HOLE_GRADIENT_WEIGHT` | `0.2` | Hole-collinearity term weight in `DUAL_ASSEMBLE`. |
 | `YAW_GRADIENT_WEIGHT` | `0.8` | Multiplicative boost on the (sinθ, cosθ) channels of the beam gradient. |
 | `LEARNING_RATE` | `0.3` | Gradient-descent step size. Hard-coded here, *not* read from `TrajOptParams.step_size`. |
+| `PIN_INSERT_TOL` | `0.008 m` | Per-pair Euclidean (xy) tolerance for pin insertion convergence. |
+| `PIN_CONVERGENCE_HYSTERESIS` | `5` cycles | Cycles a pin must remain inside `PIN_INSERT_TOL` before `RELEASE_PIN` fires. |
+| `PIN_YAW_TOL` | `0.1 rad` | Yaw gate for `ROTATE_PIN_INWARD` (≈ 5.7°). |
+| `PIN_PREGRASP_OFFSET_Z` | `0.16 m` | Hover height above pin / hole-midpoint during pin pregrasp. |
+| `INWARD_YAW_LEFT` | `−π/2` | Left-arm wrist yaw at which the gripper points toward `y = 0` ((sinθ, cosθ) = (−1, 0)). |
+| `PIN_GRASP_YAW` | `0` | Forced pregrasp / grasp yaw during `MOVE_TO_PIN_PREGRASP` and `DESCEND_TO_PIN` ((sinθ, cosθ) = (0, 1)). |
 
 ### 1.3 Deliberate deviations from the original sketch
 
@@ -112,6 +127,13 @@ These are the eight items called out in the source docstring:
    `start_loss[a] + start_loss[b]`-style scoring as in the original.
 8. **`GO_HOME` is a real state**, not a scoring bias. It uses `left_start` /
    `right_start` directly as quadratic targets.
+9. **Pin phase is single-arm.** Pin pickup, transport, rotation, and
+   insertion are all driven by the left arm only. The right arm runs the
+   `_grad_go_home` controller against `right_start` for the entire pin
+   phase (§10). Once pin phase is entered, `PICK_TASK` is permanently
+   locked out — beam re-convergence after a perturbation is not attempted
+   while pins are in flight (we do not want to drop a held pin to fix a
+   beam).
 
 ---
 
@@ -263,13 +285,23 @@ No gradient.
 Same controller as `MOVE_TO_PREGRASP`. On `_lift_reached()` →
 `PICK_TASK`, with `_enter_pick_task()` invoked immediately.
 
-### 2.12 DONE
+### 2.12 DONE (beam phase)
 
-Idle wait. `_evaluate_idle_transitions` re-runs `_select_pair()` every
-cycle; if a previously converged pair becomes unconverged (e.g. an
-external perturbation cleared an entry from `_convergence`, or a beam
-moved out of tolerance), the FSM seamlessly re-enters `PICK_TASK` without
-caller intervention. Zero gradient is emitted while waiting.
+Reached when every hole-pair is in `_convergence`. Behaviour depends on
+whether pins are configured:
+
+- **Pin phase configured** (`set_pin_positions` has been called and not
+  every pin is yet in `_pinned_pairs`) → transition immediately into
+  `STOW_RIGHT` (§10), set `_pin_phase_active = True`, lock out
+  `PICK_TASK` for the rest of the run.
+- **No pin phase or all pins placed** → idle wait.
+  `_evaluate_idle_transitions` re-runs `_select_pair()` every cycle; if a
+  previously converged pair becomes unconverged (e.g. an external
+  perturbation cleared an entry from `_convergence`, or a beam moved out
+  of tolerance), the FSM re-enters `PICK_TASK` without caller
+  intervention. **This re-entry is suppressed once
+  `_pin_phase_active = True`** — beam drift after that point is ignored.
+  Zero gradient is emitted while waiting.
 
 ### 2.13 Idle-transition fast-pathing
 
@@ -486,3 +518,180 @@ The data-bearing classes are imported verbatim from `dual_assembly`:
 Only the **algorithmic dispatch** (FSM + per-state gradient producers) is
 new; the wire format consumed by callers is bit-identical to
 `dual_assembly`.
+
+---
+
+## 10. Pin insertion phase
+
+### 10.1 Overview
+
+Once all hole-pairs are converged, the planner switches from bimanual
+beam assembly to single-arm pin insertion. The right arm is parked at
+`right_start` for the entire phase via the existing `_grad_go_home`
+controller; the left arm picks up pins one at a time and inserts them
+into the converged hole-pair midpoints.
+
+Two pins are assumed (one per pair). Pin world-frame positions are
+provided every cycle via:
+
+```python
+planner.set_pin_positions(positions)   # np.ndarray (N_pins, 3)
+```
+
+with positions sourced from the TF frames `pin0_filtered` /
+`pin1_filtered` (perception layer responsibility, mirroring
+`beam{k}_hole_filtered`).
+
+### 10.2 State diagram
+
+```
+   (beam phase DONE) ─▶ STOW_RIGHT
+                            │  right at right_start, left holds
+                            ▼
+                       PICK_PIN ──no pin/pair available──▶ ALL_DONE
+                            │
+                            ▼ (active_pin, active_hole_pair) fixed
+                MOVE_TO_PIN_PREGRASP        (yaw forced to 0)
+                            │
+                            ▼ pregrasp gate (left only)
+                    DESCEND_TO_PIN          (yaw forced to 0; snap branch)
+                            │                        │
+                            │ grasp gate             │ timeout
+                            ▼                        ▼
+                    CLOSE_PIN_GRIPPER       PIN_RECOVERY_RELEASE
+                            │                        │
+                            ▼                        ▼
+                       LIFT_PIN              PIN_RECOVERY_MOVE_UP ──▶ MOVE_TO_PIN_PREGRASP
+                            │
+                            ▼ z reached
+                    ROTATE_PIN_INWARD       (xy held, yaw → INWARD_YAW_LEFT)
+                            │
+                            ▼ yaw reached
+               MOVE_TO_HOLE_PREGRASP        (over hole midpoint, inward yaw)
+                            │
+                            ▼ pregrasp gate
+                       INSERT_PIN           (descend to insertion z; snap branch)
+                            │                        │
+                            │ insert converged       │ slip / timeout
+                            │ (hysteresis)           ▼
+                            │                PIN_RECOVERY_RELEASE
+                            ▼                        │
+                      RELEASE_PIN                    ▼
+                            │             PIN_RECOVERY_MOVE_UP
+                            ▼                        │
+                       RETREAT_PIN                   ▼
+                            │             MOVE_TO_PIN_PREGRASP   (retry same pin)
+                            ▼
+                        PICK_PIN
+```
+
+### 10.3 Pin / pair selection (`PICK_PIN`)
+
+Pin and target hole-pair are chosen jointly by greedy minimum
+Euclidean distance over the cartesian product of (unplaced pins) ×
+(converged-but-unfilled hole pairs):
+
+```python
+midpoint = 0.5 * (hole_positions[a] + hole_positions[b])     # full xyz
+score    = ‖pin_positions[pin_idx] − midpoint‖
+```
+
+The minimum-score `(pin_idx, pair_idx)` is selected and stored as
+`_active_pin_idx` / `_active_hole_pair_idx`. If no `(pin, pair)` candidate
+exists, transition to `ALL_DONE`.
+
+The midpoint is recomputed every cycle from the live `_hole_positions`
+buffer so that drift in the hole TFs after beam convergence is
+respected. The **insertion z target** is the arithmetic mean of the two
+pair holes' z values (`0.5·(hole_positions[a, 2] + hole_positions[b, 2])`)
+— the holes are assumed calibrated such that this gives a valid pin
+seating depth.
+
+### 10.4 Per-state semantics
+
+Position-only gates use per-axis `max(|Δx|, |Δy|, |Δz|) < PREGRASP_TOL`
+unless noted. Right arm is governed by `_grad_go_home(right_start)` for
+all states in this section; only the left-arm controller varies.
+
+| State | Left controller | Exit |
+|---|---|---|
+| `STOW_RIGHT` | left holds (zero gradient) | right within `MOVE_UP_TOL` of `right_start` → `PICK_PIN`. |
+| `PICK_PIN` | idle (zero gradient) | greedy `(pin, pair)` chosen → `MOVE_TO_PIN_PREGRASP`. None available → `ALL_DONE`. |
+| `MOVE_TO_PIN_PREGRASP` | left → `(pin_xy, pin_z + PIN_PREGRASP_OFFSET_Z, sin=0, cos=1)` | per-axis gate → `DESCEND_TO_PIN`. |
+| `DESCEND_TO_PIN` | left → `(pin_xy, pin_z, sin=0, cos=1)`, snap branch reused (`descent_snap_radius`) | grasp gate (per-axis `< GRASP_POS_TOL`) → `CLOSE_PIN_GRIPPER`. `_state_step ≥ DESCEND_TIMEOUT_STEPS` → `PIN_RECOVERY_RELEASE`. |
+| `CLOSE_PIN_GRIPPER` (1-step idle) | latch left gripper closed | → `LIFT_PIN`. |
+| `LIFT_PIN` | left → `(pin_xy, MOVE_UP_Z, sin=0, cos=1)` | left z within `MOVE_UP_TOL` of `MOVE_UP_Z` → `ROTATE_PIN_INWARD`. |
+| `ROTATE_PIN_INWARD` | left → `(current_xy, MOVE_UP_Z, INWARD_YAW_LEFT)` (xy held; only yaw moves) | yaw within `PIN_YAW_TOL` of `INWARD_YAW_LEFT` → `MOVE_TO_HOLE_PREGRASP`. |
+| `MOVE_TO_HOLE_PREGRASP` | left → `(midpoint_xy, MOVE_UP_Z, INWARD_YAW_LEFT)` | per-axis gate → `INSERT_PIN`. |
+| `INSERT_PIN` | left → `(midpoint_xy, midpoint_z, INWARD_YAW_LEFT)`, snap branch reused (`assemble_snap_radius`) | `_pin_insert_converged()` (xy distance to midpoint `< PIN_INSERT_TOL` for `PIN_CONVERGENCE_HYSTERESIS` consecutive steps) → `RELEASE_PIN`. Slip (`‖ee_xy − midpoint_xy‖ > ASSEMBLE_SLIP_DIST` for `ASSEMBLE_SLIP_STEPS` steps) or `_state_step ≥ ASSEMBLE_TIMEOUT_STEPS` → `PIN_RECOVERY_RELEASE`. |
+| `RELEASE_PIN` (1-step idle) | latch left gripper open; mark `_pinned_pairs.add(_active_hole_pair_idx)`; `_pin_inserted[_active_pin_idx] = True` | → `RETREAT_PIN`. |
+| `RETREAT_PIN` | left → `(midpoint_xy, MOVE_UP_Z, INWARD_YAW_LEFT)` | left z reached → `PICK_PIN`. |
+| `PIN_RECOVERY_RELEASE` (1-step idle) | latch left gripper open | → `PIN_RECOVERY_MOVE_UP`. |
+| `PIN_RECOVERY_MOVE_UP` | left → `(current_xy, MOVE_UP_Z, current_yaw)` | left z reached → `MOVE_TO_PIN_PREGRASP` (same `_active_pin_idx`). |
+| `ALL_DONE` | idle (zero gradient) | terminal — no perturbation re-entry. |
+
+The retry semantics are deliberately symmetric with the beam phase:
+recovery is open-gripper-then-lift-then-re-pregrasp, with the same
+`(pin_idx, hole_pair_idx)` retained so the planner re-attempts the same
+job rather than re-running selection. The `INSERT_PIN` slip /
+non-convergence path is the explicit "if the pin is not within 8 mm of
+the target, do not release — regrasp" loop: `RELEASE_PIN` is only
+reachable after `_pin_insert_converged()` fires; every other exit from
+`INSERT_PIN` routes through recovery and re-grasp.
+
+### 10.5 FSM bookkeeping (new fields on `DualAssembly`)
+
+```python
+self._pin_positions: Optional[np.ndarray]  # (N_pins, 3); set via set_pin_positions
+self._pin_inserted: List[bool]             # length N_pins
+self._pinned_pairs: set[int]               # hole-pair indices already filled
+self._active_pin_idx: Optional[int]
+self._active_hole_pair_idx: Optional[int]
+self._pin_phase_active: bool               # latched True on entering STOW_RIGHT; never cleared
+self._pin_insert_counter: int              # hysteresis counter for _pin_insert_converged
+```
+
+### 10.6 Public API additions
+
+```python
+planner.set_pin_positions(positions: np.ndarray)   # (N_pins, 3); call every cycle
+```
+
+`optimise()` pre-condition: if pin phase is active *and*
+`set_pin_positions(...)` has not been called this cycle, raise
+`RuntimeError` (mirrors the existing `set_hole_positions` guard). The
+constructor does **not** require pins; a planner instantiated without
+ever receiving pins simply terminates in beam-phase `DONE` once all
+pairs converge.
+
+### 10.7 Diagnostics additions
+
+`log_state` and the ROS diagnostics layer (`frank_atls.py`,
+`record_atls.launch`, analysis scripts) gain:
+
+- `/atls/pin_phase_active` (bool) — `_pin_phase_active`.
+- `/atls/active_pin_idx` (int, −1 when None) — `_active_pin_idx`.
+- `/atls/active_hole_pair_idx` (int, −1 when None) — `_active_hole_pair_idx`.
+- `/atls/pinned_pairs` (int[]) — sorted list of `_pinned_pairs`.
+- `/atls/pin_insert_counter` (int) — `_pin_insert_counter`.
+- `/atls/pin_distances` (float[N_pins]) — per-pin distance to its
+  current target (active pin to midpoint; others zero).
+
+The `STATE_PALETTE` used by the bag-analysis scripts must be extended to
+cover the new state IDs so FSM-overlay plots remain readable.
+
+### 10.8 Invariants
+
+- `_pin_phase_active` is monotonically non-decreasing — once set, never
+  cleared for the remainder of the run.
+- `PICK_TASK` is unreachable while `_pin_phase_active` is True (the
+  DONE→PICK_TASK perturbation re-entry in `_evaluate_idle_transitions`
+  is suppressed under this flag).
+- `_pin_inserted[k]` and membership in `_pinned_pairs` are monotonically
+  non-decreasing — pins, once placed, are never re-attempted.
+- `RELEASE_PIN` is only reachable from `INSERT_PIN` via
+  `_pin_insert_converged()`; every other exit goes through the recovery
+  chain. This is the implementation of the "8 mm regrasp loop".
+- The right arm is held at `right_start` for the entire pin phase by
+  running `_grad_go_home` regardless of state. There is no path that
+  drives the right arm toward any pin or hole during pin phase.

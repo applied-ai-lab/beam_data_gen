@@ -159,6 +159,35 @@ ASSEMBLE_SNAP_RADIUS: float = 0.02
 
 
 # ---------------------------------------------------------------------------
+# Pin-phase tunables (see PERCEPTIVE_ASSEMBLY.MD §10).
+# ---------------------------------------------------------------------------
+
+# Per-pair Euclidean (xy) tolerance for pin insertion convergence — the
+# "8 mm regrasp loop": below this, RELEASE_PIN may fire; above it, the
+# planner forces a recovery + regrasp instead of releasing.
+PIN_INSERT_TOL: float = 0.008
+
+# Cycles the pin must remain inside PIN_INSERT_TOL before RELEASE_PIN fires.
+PIN_CONVERGENCE_HYSTERESIS: int = 5
+
+# Yaw gate for ROTATE_PIN_INWARD (rad).
+PIN_YAW_TOL: float = 0.1
+
+# Hover height above pin / hole-midpoint during pin pregrasp (m).
+PIN_PREGRASP_OFFSET_Z: float = 0.16
+
+# Pregrasp / grasp yaw is forced to 0 during pin pickup —
+# (sin θ, cos θ) = (0, 1).
+PIN_GRASP_SIN: float = 0.0
+PIN_GRASP_COS: float = 1.0
+
+# "Inward" for the left arm: gripper points toward y = 0.  Left arm sits
+# on +y, so inward yaw = -π/2 → (sin θ, cos θ) = (-1, 0).
+INWARD_YAW_LEFT_SIN: float = -1.0
+INWARD_YAW_LEFT_COS: float = 0.0
+
+
+# ---------------------------------------------------------------------------
 # State enum
 # ---------------------------------------------------------------------------
 
@@ -179,6 +208,22 @@ class State(IntEnum):
     RELEASE_GRIPPER  = 9   # successful assembly: open grippers (1 step)
     MOVE_AWAY        = 10  # lift to pregrasp height, then PICK_TASK
     DONE             = 11  # idle loop: all pairs converged, re-enters PICK_TASK on perturbation
+
+    # ---- Pin insertion phase (single-arm; right held at right_start). ----
+    STOW_RIGHT             = 12  # right→right_start, left holds; entered when all beams converged
+    PICK_PIN               = 13  # greedy assignment: closest pin → closest unfilled pair
+    MOVE_TO_PIN_PREGRASP   = 14  # left hovers above pin, yaw = 0
+    DESCEND_TO_PIN         = 15  # left descends to pin, yaw = 0
+    CLOSE_PIN_GRIPPER      = 16  # latch left gripper closed (1 step)
+    LIFT_PIN               = 17  # lift pin to MOVE_UP_Z, yaw = 0
+    ROTATE_PIN_INWARD      = 18  # rotate left wrist 90° inward (toward y = 0)
+    MOVE_TO_HOLE_PREGRASP  = 19  # left moves over hole-pair midpoint, inward yaw
+    INSERT_PIN             = 20  # descend pin into midpoint; 8 mm convergence gate
+    RELEASE_PIN            = 21  # latch left gripper open (1 step) on success
+    RETREAT_PIN            = 22  # lift to MOVE_UP_Z then PICK_PIN
+    PIN_RECOVERY_RELEASE   = 23  # open gripper on grasp/insert failure (1 step)
+    PIN_RECOVERY_MOVE_UP   = 24  # lift, retry MOVE_TO_PIN_PREGRASP for same pin
+    ALL_DONE               = 25  # terminal: all pins placed
 
 
 # ---------------------------------------------------------------------------
@@ -346,10 +391,22 @@ class DualAssembly(TrajOptBase):
         # ---- FSM bookkeeping. ----
         self._state: State = State.GO_HOME
         self._state_step: int = 0      # steps spent in current state
-        self._slip_counter: int = 0    # consecutive slip steps (DUAL_ASSEMBLE)
+        self._slip_counter: int = 0    # consecutive slip steps (DUAL_ASSEMBLE / INSERT_PIN)
         # Per-arm gripper command — flipped only by CLOSE_GRIPPER /
         # RELEASE_GRIPPER / RECOVERY_RELEASE. No hysteresis.
         self._gripper_closed: List[bool] = [False, False]
+
+        # ---- Pin phase bookkeeping (see PERCEPTIVE_ASSEMBLY.MD §10). ----
+        # Sized lazily by ``set_pin_positions``.  ``_pin_phase_active`` is a
+        # one-way latch — once true, PICK_TASK is unreachable for the rest
+        # of the run.
+        self._pin_positions: Optional[np.ndarray] = None
+        self._pin_inserted: List[bool] = []
+        self._pinned_pairs: set = set()
+        self._active_pin_idx: Optional[int] = None
+        self._active_hole_pair_idx: Optional[int] = None
+        self._pin_phase_active: bool = False
+        self._pin_insert_counter: int = 0
 
         # ---- Testing / diagnostics knobs. ----
         # Set step_mode = True to pause at every FSM state transition and wait
@@ -377,6 +434,18 @@ class DualAssembly(TrajOptBase):
                 hole transform in the robot base frame.
         """
         self._hole_positions = positions
+
+    def set_pin_positions(self, positions: np.ndarray) -> None:
+        """Update perceived pin positions — required every cycle once pin
+        phase is active.
+
+        Args:
+            positions: ``(N_pins, 3)`` world-frame XYZ for each pin
+                (typically sourced from ``pin{0..N-1}_filtered`` TF frames).
+        """
+        if self._pin_positions is None:
+            self._pin_inserted = [False] * positions.shape[0]
+        self._pin_positions = positions
 
     @property
     def states(self) -> DualArmStates:
@@ -438,8 +507,15 @@ class DualAssembly(TrajOptBase):
         """Run one planning cycle of ``no_steps`` gradient-descent integrations.
 
         Raises:
-            RuntimeError: if ``set_hole_positions`` was never called.
+            RuntimeError: if ``set_hole_positions`` was never called, or if
+                pin phase is active and ``set_pin_positions`` has not been
+                called this cycle.
         """
+        if self._pin_phase_active and self._pin_positions is None:
+            raise RuntimeError(
+                "Pin phase is active but set_pin_positions(...) has not "
+                "been called."
+            )
         if self._hole_positions is None:
             raise RuntimeError(
                 "set_hole_positions(...) must be called before optimise()."
@@ -648,10 +724,19 @@ class DualAssembly(TrajOptBase):
             # cleared by upstream failure-recovery code).  When new work
             # appears the FSM seamlessly re-enters PICK_TASK without any
             # caller intervention.  Zero gradient is emitted while waiting.
+            #
+            # Once pin phase has been entered, the perturbation re-entry
+            # is suppressed — we do not want to drop a held pin to fix a
+            # drifted beam (see PERCEPTIVE_ASSEMBLY.MD §10.8).
+            if self._pin_phase_active:
+                return
             if self._select_pair() is not None:
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
             return
+
+        if self._state == State.ALL_DONE:
+            return  # terminal — no perturbation re-entry
 
         if self._state == State.PICK_TASK:
             self._enter_pick_task()
@@ -668,6 +753,26 @@ class DualAssembly(TrajOptBase):
         elif self._state == State.RELEASE_GRIPPER:
             self._gripper_closed = [False, False]
             self._goto(State.MOVE_AWAY)
+        elif self._state == State.PICK_PIN:
+            self._enter_pick_pin()
+        elif self._state == State.CLOSE_PIN_GRIPPER:
+            # Single-arm: only the left gripper is actuated in pin phase.
+            self._gripper_closed[0] = True
+            self._goto(State.LIFT_PIN)
+        elif self._state == State.RELEASE_PIN:
+            self._gripper_closed[0] = False
+            if self._active_hole_pair_idx is not None:
+                self._pinned_pairs.add(self._active_hole_pair_idx)
+            if self._active_pin_idx is not None:
+                self._pin_inserted[self._active_pin_idx] = True
+            self._pin_insert_counter = 0
+            self._slip_counter = 0
+            self._goto(State.RETREAT_PIN)
+        elif self._state == State.PIN_RECOVERY_RELEASE:
+            self._gripper_closed[0] = False
+            self._pin_insert_counter = 0
+            self._slip_counter = 0
+            self._goto(State.PIN_RECOVERY_MOVE_UP)
 
     def _evaluate_step_transitions(self) -> None:
         """Check gradient-driven gates after each integration step."""
@@ -721,6 +826,68 @@ class DualAssembly(TrajOptBase):
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
 
+        # ---- Pin phase ----
+        elif self._state == State.STOW_RIGHT:
+            if self._right_at_home():
+                self._goto(State.PICK_PIN)
+                self._evaluate_idle_transitions()  # resolve PICK_PIN
+
+        elif self._state == State.MOVE_TO_PIN_PREGRASP:
+            if self._pin_pregrasp_reached():
+                self._goto(State.DESCEND_TO_PIN)
+
+        elif self._state == State.DESCEND_TO_PIN:
+            if self._pin_grasp_contact():
+                self._goto(State.CLOSE_PIN_GRIPPER)
+                self._evaluate_idle_transitions()  # → LIFT_PIN
+            elif self._state_step >= DESCEND_TIMEOUT_STEPS:
+                self._goto(State.PIN_RECOVERY_RELEASE)
+                self._evaluate_idle_transitions()  # → PIN_RECOVERY_MOVE_UP
+
+        elif self._state == State.LIFT_PIN:
+            if self._left_lift_reached():
+                self._goto(State.ROTATE_PIN_INWARD)
+
+        elif self._state == State.ROTATE_PIN_INWARD:
+            if self._pin_yaw_reached():
+                self._goto(State.MOVE_TO_HOLE_PREGRASP)
+
+        elif self._state == State.MOVE_TO_HOLE_PREGRASP:
+            if self._hole_pregrasp_reached():
+                self._goto(State.INSERT_PIN)
+
+        elif self._state == State.INSERT_PIN:
+            # Convergence — the "8 mm regrasp loop" entry point. RELEASE_PIN
+            # is reachable ONLY from here; every other exit forces recovery.
+            if self._check_pin_insert_progress():
+                self._slip_counter = 0
+                self._goto(State.RELEASE_PIN)
+                self._evaluate_idle_transitions()  # opens left, → RETREAT_PIN
+                return
+            if self._pin_slipped():
+                self._slip_counter += 1
+            else:
+                self._slip_counter = 0
+            if self._slip_counter >= ASSEMBLE_SLIP_STEPS:
+                self._slip_counter = 0
+                self._pin_insert_counter = 0
+                self._goto(State.PIN_RECOVERY_RELEASE)
+                self._evaluate_idle_transitions()
+                return
+            if self._state_step >= ASSEMBLE_TIMEOUT_STEPS:
+                self._pin_insert_counter = 0
+                self._goto(State.PIN_RECOVERY_RELEASE)
+                self._evaluate_idle_transitions()
+
+        elif self._state == State.RETREAT_PIN:
+            if self._left_lift_reached():
+                self._goto(State.PICK_PIN)
+                self._evaluate_idle_transitions()  # → MOVE_TO_PIN_PREGRASP or ALL_DONE
+
+        elif self._state == State.PIN_RECOVERY_MOVE_UP:
+            if self._left_lift_reached():
+                self._goto(State.MOVE_TO_PIN_PREGRASP)
+
         # GO_HOME counter
         self._state_step += 1
 
@@ -755,6 +922,15 @@ class DualAssembly(TrajOptBase):
             self._active_pair_idx = None
             self._left_index = None
             self._right_index = None
+            # If pin positions have been provided and there is at least
+            # one pin still to place, latch into pin phase. Otherwise
+            # fall back to the original drive-home-then-idle behaviour.
+            if (self._pin_positions is not None
+                    and not all(self._pin_inserted)
+                    and self._pin_inserted):  # non-empty → at least one pin known
+                self._pin_phase_active = True
+                self._goto(State.STOW_RIGHT)
+                return
             # Drive arms back to start posture before idling so they do not
             # drift away while waiting in DONE. If already home, idle directly.
             if self._home_reached():
@@ -836,8 +1012,21 @@ class DualAssembly(TrajOptBase):
             self._grad_descending()
         elif s == State.DUAL_ASSEMBLE:
             self._grad_dual_assemble()
+        elif s in (
+            State.STOW_RIGHT,
+            State.MOVE_TO_PIN_PREGRASP,
+            State.DESCEND_TO_PIN,
+            State.LIFT_PIN,
+            State.ROTATE_PIN_INWARD,
+            State.MOVE_TO_HOLE_PREGRASP,
+            State.INSERT_PIN,
+            State.RETREAT_PIN,
+            State.PIN_RECOVERY_MOVE_UP,
+        ):
+            self._grad_pin_phase()
         # PICK_TASK / CLOSE_GRIPPER / READY / RELEASE_GRIPPER /
-        # RECOVERY_RELEASE / DONE  → zero gradient (already set above).
+        # RECOVERY_RELEASE / DONE / PICK_PIN / CLOSE_PIN_GRIPPER /
+        # RELEASE_PIN / PIN_RECOVERY_RELEASE / ALL_DONE → zero gradient.
         return self._gradients
 
     def _grad_go_home(self) -> None:
@@ -998,6 +1187,214 @@ class DualAssembly(TrajOptBase):
         right_g[2] = 0.0
         self._gradients.left_pose  = left_g
         self._gradients.right_pose = right_g
+
+    # ------------------------------------------------------------------
+    # Pin phase — single-arm controller, gates, and selection.
+    # ------------------------------------------------------------------
+
+    def _grad_pin_phase(self) -> None:
+        """Single-arm pin-phase controller.
+
+        Right arm always pursues ``right_start`` (mirrors ``_grad_go_home``)
+        for the entire pin phase.  Left arm pursues a state-specific target
+        built by ``_left_target_for_state``; in ``STOW_RIGHT`` the left arm
+        is held (zero gradient).
+
+        Snap branch reuses ``descent_snap_radius`` for ``DESCEND_TO_PIN``
+        and ``assemble_snap_radius`` for ``INSERT_PIN`` so the pin pickup /
+        insertion gradient lands exactly on the target inside the radius
+        (same trick as ``_grad_descending``).
+        """
+        loss_r = ((self._states.right_pose - self.right_start) ** 2).sum()
+        self._gradients.right_pose = grad(
+            loss_r, self._states.right_pose, retain_graph=True
+        )[0]
+
+        target = self._left_target_for_state()
+        if target is None:
+            return  # STOW_RIGHT or missing data → left holds
+
+        loss_l = ((self._states.left_pose - target) ** 2).sum()
+        g_l = grad(loss_l, self._states.left_pose, retain_graph=True)[0]
+
+        snap_r = 0.0
+        if self._state == State.DESCEND_TO_PIN:
+            snap_r = self.descent_snap_radius
+        elif self._state == State.INSERT_PIN:
+            snap_r = self.assemble_snap_radius
+
+        if snap_r > 0.0 and LEARNING_RATE > 0.0:
+            with torch.no_grad():
+                diff = self._states.left_pose - target
+                dist = float((diff[:3] ** 2).sum() ** 0.5)
+                if 0.0 < dist < snap_r:
+                    g_l = diff.detach() / LEARNING_RATE
+
+        self._gradients.left_pose = g_l
+
+    def _left_target_for_state(self) -> Optional[torch.Tensor]:
+        """Build the 5-DOF left-arm target for the current pin-phase state.
+
+        Returns ``None`` when the active state has no left-arm target
+        (STOW_RIGHT) or when required perception is missing.
+        """
+        s = self._state
+        device = self.params.device
+
+        def _t(x, y, z, sin_yaw, cos_yaw) -> torch.Tensor:
+            return torch.tensor(
+                [float(x), float(y), float(z), float(sin_yaw), float(cos_yaw)],
+                dtype=torch.float32, device=device,
+            )
+
+        if s == State.STOW_RIGHT:
+            return None  # left holds
+
+        if s in (State.MOVE_TO_PIN_PREGRASP, State.DESCEND_TO_PIN):
+            if self._active_pin_idx is None or self._pin_positions is None:
+                return None
+            pin = self._pin_positions[self._active_pin_idx]
+            z_offset = (PIN_PREGRASP_OFFSET_Z
+                        if s == State.MOVE_TO_PIN_PREGRASP else 0.0)
+            return _t(pin[0], pin[1], pin[2] + z_offset,
+                      PIN_GRASP_SIN, PIN_GRASP_COS)
+
+        if s == State.LIFT_PIN:
+            cur = self._states.left_pose.detach()
+            return _t(cur[0], cur[1], MOVE_UP_Z, PIN_GRASP_SIN, PIN_GRASP_COS)
+
+        if s == State.ROTATE_PIN_INWARD:
+            cur = self._states.left_pose.detach()
+            return _t(cur[0], cur[1], MOVE_UP_Z,
+                      INWARD_YAW_LEFT_SIN, INWARD_YAW_LEFT_COS)
+
+        if s in (State.MOVE_TO_HOLE_PREGRASP, State.INSERT_PIN, State.RETREAT_PIN):
+            if self._active_hole_pair_idx is None or self._hole_positions is None:
+                return None
+            a, b = self._hole_pairs[self._active_hole_pair_idx]
+            mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+            z = float(mid[2]) if s == State.INSERT_PIN else MOVE_UP_Z
+            return _t(mid[0], mid[1], z,
+                      INWARD_YAW_LEFT_SIN, INWARD_YAW_LEFT_COS)
+
+        if s == State.PIN_RECOVERY_MOVE_UP:
+            cur = self._states.left_pose.detach()
+            return _t(cur[0], cur[1], MOVE_UP_Z, cur[3], cur[4])
+
+        return None
+
+    def _enter_pick_pin(self) -> None:
+        """Greedy pin/pair assignment by closest-distance scoring.
+
+        Iterates the cartesian product of (unplaced pins) × (converged
+        but unfilled hole pairs) and picks the minimum
+        ``‖pin − midpoint‖`` candidate.  Resets the per-active counters
+        before the next state runs.  If no candidate exists, transitions
+        to ``ALL_DONE``.
+        """
+        best, best_score = None, float("inf")
+        for pair_idx, (a, b) in enumerate(self._hole_pairs):
+            if pair_idx in self._pinned_pairs:
+                continue
+            if not (a in self._convergence and b in self._convergence):
+                continue
+            mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+            for pin_idx, placed in enumerate(self._pin_inserted):
+                if placed:
+                    continue
+                d = float(np.linalg.norm(self._pin_positions[pin_idx] - mid))
+                if d < best_score:
+                    best_score = d
+                    best = (pin_idx, pair_idx)
+
+        if best is None:
+            self._active_pin_idx = None
+            self._active_hole_pair_idx = None
+            self._goto(State.ALL_DONE)
+            return
+
+        self._active_pin_idx, self._active_hole_pair_idx = best
+        self._pin_insert_counter = 0
+        self._slip_counter = 0
+        self._goto(State.MOVE_TO_PIN_PREGRASP)
+
+    # ---- Pin-phase gates ----
+
+    def _right_at_home(self) -> bool:
+        d = float(((self._states.right_pose[:3] - self.right_start[:3]) ** 2)
+                  .sum().sqrt())
+        return d < MOVE_UP_TOL
+
+    def _pin_pregrasp_reached(self) -> bool:
+        if self._active_pin_idx is None or self._pin_positions is None:
+            return False
+        pin = self._pin_positions[self._active_pin_idx]
+        target = torch.tensor(
+            [pin[0], pin[1], pin[2] + PIN_PREGRASP_OFFSET_Z],
+            dtype=torch.float32, device=self.params.device,
+        )
+        return float((self._states.left_pose[:3] - target).abs().max()) < PREGRASP_TOL
+
+    def _pin_grasp_contact(self) -> bool:
+        if self._active_pin_idx is None or self._pin_positions is None:
+            return False
+        pin = self._pin_positions[self._active_pin_idx]
+        target = torch.tensor(
+            [pin[0], pin[1], pin[2]],
+            dtype=torch.float32, device=self.params.device,
+        )
+        return float((self._states.left_pose[:3] - target).abs().max()) < GRASP_POS_TOL
+
+    def _left_lift_reached(self) -> bool:
+        return abs(float(self._states.left_pose[2]) - MOVE_UP_Z) < MOVE_UP_TOL
+
+    def _pin_yaw_reached(self) -> bool:
+        cur_sin = float(self._states.left_pose[3])
+        cur_cos = float(self._states.left_pose[4])
+        cur_yaw = float(np.arctan2(cur_sin, cur_cos))
+        target_yaw = float(np.arctan2(INWARD_YAW_LEFT_SIN, INWARD_YAW_LEFT_COS))
+        err = (cur_yaw - target_yaw + np.pi) % (2 * np.pi) - np.pi
+        return abs(err) < PIN_YAW_TOL
+
+    def _hole_pregrasp_reached(self) -> bool:
+        if self._active_hole_pair_idx is None or self._hole_positions is None:
+            return False
+        a, b = self._hole_pairs[self._active_hole_pair_idx]
+        mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+        target = torch.tensor(
+            [mid[0], mid[1], MOVE_UP_Z],
+            dtype=torch.float32, device=self.params.device,
+        )
+        return float((self._states.left_pose[:3] - target).abs().max()) < PREGRASP_TOL
+
+    def _check_pin_insert_progress(self) -> bool:
+        """Advance / reset the insert hysteresis counter and return True
+        when the pin has stayed inside ``PIN_INSERT_TOL`` of the hole-pair
+        midpoint for ``PIN_CONVERGENCE_HYSTERESIS`` consecutive steps.
+
+        This is the gate that controls the "8 mm regrasp loop": only when
+        this returns True does ``RELEASE_PIN`` fire; otherwise the planner
+        is forced through recovery and re-grasps the pin.
+        """
+        if self._active_hole_pair_idx is None or self._hole_positions is None:
+            return False
+        a, b = self._hole_pairs[self._active_hole_pair_idx]
+        mid_xy = 0.5 * (self._hole_positions[a, :2] + self._hole_positions[b, :2])
+        ee_xy = self._states.left_pose[:2].detach().cpu().numpy()
+        d = float(np.linalg.norm(ee_xy - mid_xy))
+        if d < PIN_INSERT_TOL:
+            self._pin_insert_counter += 1
+        else:
+            self._pin_insert_counter = 0
+        return self._pin_insert_counter >= PIN_CONVERGENCE_HYSTERESIS
+
+    def _pin_slipped(self) -> bool:
+        if self._active_hole_pair_idx is None or self._hole_positions is None:
+            return False
+        a, b = self._hole_pairs[self._active_hole_pair_idx]
+        mid_xy = 0.5 * (self._hole_positions[a, :2] + self._hole_positions[b, :2])
+        ee_xy = self._states.left_pose[:2].detach().cpu().numpy()
+        return float(np.linalg.norm(ee_xy - mid_xy)) > ASSEMBLE_SLIP_DIST
 
     # ------------------------------------------------------------------
     # Gates — small predicates on the latest losses.

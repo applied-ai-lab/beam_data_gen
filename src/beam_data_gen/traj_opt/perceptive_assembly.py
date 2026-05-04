@@ -828,7 +828,7 @@ class DualAssembly(TrajOptBase):
         s = self._state
         if s == State.GO_HOME:
             self._grad_go_home()
-        elif s in (State.MOVE_TO_PREGRASP):
+        elif s == State.MOVE_TO_PREGRASP:
             self._grad_pregrasp()
         elif s in (State.RECOVERY_MOVE_UP,State.MOVE_AWAY):
             self._grad_lift()

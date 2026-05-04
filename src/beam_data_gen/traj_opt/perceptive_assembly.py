@@ -120,7 +120,7 @@ PREGRASP_TOL: float = 0.03
 GRASP_POS_TOL: float = 0.01
 
 # Per-pair assembly convergence (Euclidean hole distance).
-HOLE_CONVERGENCE_THRESHOLD: float = 0.0025
+HOLE_CONVERGENCE_THRESHOLD: float = 0.003
 
 # Cycles a pair must stay below the hole threshold before being latched.
 CONVERGENCE_HYSTERESIS: int = 5

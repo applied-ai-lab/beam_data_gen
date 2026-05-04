@@ -113,14 +113,14 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
 # Pregrasp gate: per-axis max absolute error on (x, y, z). Rotation ignored.
 # Each of |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-PREGRASP_TOL: float = 0.02
+PREGRASP_TOL: float = 0.03
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
 GRASP_POS_TOL: float = 0.01
 
 # Per-pair assembly convergence (Euclidean hole distance).
-HOLE_CONVERGENCE_THRESHOLD: float = 0.003
+HOLE_CONVERGENCE_THRESHOLD: float = 0.0025
 
 # Cycles a pair must stay below the hole threshold before being latched.
 CONVERGENCE_HYSTERESIS: int = 5
@@ -137,25 +137,25 @@ ASSEMBLE_TIMEOUT_STEPS: int = 100
 GO_HOME_TIMEOUT_STEPS:  int = 100
 
 # Position-only gate for MOVE_AWAY / RECOVERY_MOVE_UP (orientation ignored).
-MOVE_UP_TOL: float = 0.05
+MOVE_UP_TOL: float = 0.035
 MOVE_UP_Z: float = 1.0
 
 
 # Gradient mixing — kept identical to dual_assembly.py for behavioural parity
 # in the assembly phase.
-HOLE_GRADIENT_WEIGHT: float = 0.2
-YAW_GRADIENT_WEIGHT:  float = 0.8
+HOLE_GRADIENT_WEIGHT: float = 0.0
+YAW_GRADIENT_WEIGHT:  float = 1.0
 
 # Gradient-descent learning rate. Hard-coded here (instead of read from
 # TrajOptParams.step_size) so the planner's integrator step is fixed by the
 # module rather than by callers.
-LEARNING_RATE: float = 0.3
+LEARNING_RATE: float = 0.4
 
 # Snap radii (metres). Inside the radius the per-state gradient is replaced
 # by one whose integrator step lands exactly on the target, bypassing the
 # asymptotic shrinkage of a quadratic loss. Set to 0.0 to disable.
 DESCENT_SNAP_RADIUS:  float = 0.04
-ASSEMBLE_SNAP_RADIUS: float = 0.04
+ASSEMBLE_SNAP_RADIUS: float = 0.02
 
 
 # ---------------------------------------------------------------------------

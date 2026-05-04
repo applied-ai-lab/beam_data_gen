@@ -113,7 +113,7 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
 # Pregrasp gate: per-axis max absolute error on (x, y, z). Rotation ignored.
 # Each of |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-PREGRASP_TOL: float = 0.03
+PREGRASP_TOL: float = 0.02
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
@@ -128,7 +128,7 @@ CONVERGENCE_HYSTERESIS: int = 5
 # DUAL_ASSEMBLE slippage detector. Distance is measured per arm between the
 # end-effector position and its assigned beam position; if exceeded for the
 # given number of consecutive steps the grasp is considered failed.
-ASSEMBLE_SLIP_DIST: float = 0.05      # 5 cm
+ASSEMBLE_SLIP_DIST: float = 0.03      # 5 cm
 ASSEMBLE_SLIP_STEPS: int  = 15
 
 # Per-state step budgets. The planner runs at ~30 Hz so 150 ≈ 5 s.
@@ -141,13 +141,13 @@ MOVE_UP_TOL: float = 0.03
 
 # Gradient mixing — kept identical to dual_assembly.py for behavioural parity
 # in the assembly phase.
-HOLE_GRADIENT_WEIGHT: float = 0.1
+HOLE_GRADIENT_WEIGHT: float = 0.2
 YAW_GRADIENT_WEIGHT:  float = 1.0
 
 # Gradient-descent learning rate. Hard-coded here (instead of read from
 # TrajOptParams.step_size) so the planner's integrator step is fixed by the
 # module rather than by callers.
-LEARNING_RATE: float = 0.4
+LEARNING_RATE: float = 0.3
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +306,7 @@ class DualAssembly(TrajOptBase):
 
         # Fixed z height the arms descend to in DESCENDING, regardless of the
         # perceived beam z.  Set to sit the gripper at beam surface height.
-        self.grasp_z: float = 0.793
+        self.grasp_z: float = 0.793 #UNUSED NOW
 
         # Inside this radius (m) of the descent target the gradient is replaced
         # by one whose integrator step lands the planner state exactly on the
@@ -315,7 +315,7 @@ class DualAssembly(TrajOptBase):
         # max_ee_step (above) still clips the per-step displacement, so motion
         # remains smooth even if the diff is large.
         # Set descent_snap_radius to 0.0 to disable (vanilla quadratic descent).
-        self.descent_snap_radius:    float = 0.04
+        self.descent_snap_radius:    float = 0.03
 
         # Cached per-axis max absolute (x, y, z) error vs. the fixed-z grasp
         # target, updated each _grad_descending call and read by _grasp_contact.

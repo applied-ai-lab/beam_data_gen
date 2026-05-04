@@ -91,7 +91,6 @@ import numpy as np
 import torch
 from torch.autograd import grad
 import mujoco
-from filterpy.monte_carlo import systematic_resample
 
 from beam_data_gen.traj_opt.dual_assembly import (
     DualArmGradients,
@@ -118,7 +117,7 @@ PREGRASP_TOL: float = 0.03
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-GRASP_POS_TOL: float = 0.010
+GRASP_POS_TOL: float = 0.008
 
 # Per-pair assembly convergence (Euclidean hole distance).
 HOLE_CONVERGENCE_THRESHOLD: float = 0.003
@@ -138,17 +137,17 @@ ASSEMBLE_TIMEOUT_STEPS: int = 100
 GO_HOME_TIMEOUT_STEPS:  int = 100
 
 # Position-only gate for MOVE_AWAY / RECOVERY_MOVE_UP (orientation ignored).
-MOVE_UP_TOL: float = 0.05
+MOVE_UP_TOL: float = 0.03
 
 # Gradient mixing — kept identical to dual_assembly.py for behavioural parity
 # in the assembly phase.
 HOLE_GRADIENT_WEIGHT: float = 0.1
-YAW_GRADIENT_WEIGHT:  float = 1.5
+YAW_GRADIENT_WEIGHT:  float = 1.0
 
 # Gradient-descent learning rate. Hard-coded here (instead of read from
 # TrajOptParams.step_size) so the planner's integrator step is fixed by the
 # module rather than by callers.
-LEARNING_RATE: float = 0.2
+LEARNING_RATE: float = 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +223,7 @@ def _hole_collinearity_loss(
 class DualAssembly(TrajOptBase):
     """Hybrid state-machine perceptive assembly planner.
 
-    Each call to :meth:`optimise` runs ``params.no_steps`` particle-filter
+    Each call to :meth:`optimise` runs ``params.no_steps`` gradient-descent
     integration steps from the current ``self.states`` baseline. Within a
     single call the FSM may transition multiple times — transitions are
     re-evaluated after every integration step. The state itself persists
@@ -290,7 +289,7 @@ class DualAssembly(TrajOptBase):
         # Match the IK z-limits enforced by frank_atls.py (_z_lims = [0.755, 1.00]).
         # A mismatch means the planner routinely requests poses that hardware silently
         # clips, causing the planner state to diverge from reality each cycle.
-        self.arm_z_floor: float = 0.8
+        self.arm_z_floor: float = 0.78
         self.arm_z_ceil:  float = 1.150
 
         # Per-arm z workspace bounds.  Defaults mirror arm_z_floor / arm_z_ceil
@@ -316,7 +315,7 @@ class DualAssembly(TrajOptBase):
         # max_ee_step (above) still clips the per-step displacement, so motion
         # remains smooth even if the diff is large.
         # Set descent_snap_radius to 0.0 to disable (vanilla quadratic descent).
-        self.descent_snap_radius:    float = 0.02
+        self.descent_snap_radius:    float = 0.04
 
         # Cached per-axis max absolute (x, y, z) error vs. the fixed-z grasp
         # target, updated each _grad_descending call and read by _grasp_contact.
@@ -354,9 +353,13 @@ class DualAssembly(TrajOptBase):
         self.step_mode: bool = False
         self._step_mode_last_state: Optional[State] = None
 
-        # Particle-filter containers (allocated lazily by initialise()).
+        # Trajectory buffer (allocated lazily by initialise()). Wrapped in a
+        # ``ParticleTrajectories`` purely to preserve the consumer-facing API
+        # (``sample_indices`` / ``sample_trajectories``) — there is no actual
+        # particle filter; this planner produces one deterministic rollout per
+        # cycle. The particle dimension is kept at ``params.no_particles`` and
+        # broadcast across so downstream indexing stays valid.
         self._particle_trajectories: Optional[ParticleTrajectories] = None
-        self._weights: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------
     # Public API expected by callers
@@ -393,7 +396,7 @@ class DualAssembly(TrajOptBase):
         )
 
     def initialise(self, states: DualArmStates) -> None:
-        """Allocate particle-filter buffers for the current trajectory size."""
+        """Allocate the trajectory buffer for the current trajectory size."""
         self._states = states
         pt = ParticleTrajectories()
         n_particles = self.params.no_particles
@@ -409,26 +412,26 @@ class DualAssembly(TrajOptBase):
             dtype=torch.float32,
             device=self._x.device,
         )
-        pt.indices = torch.zeros([n_steps, n_particles], dtype=torch.int32)
-        pt.no_live_particles = torch.zeros([n_steps], dtype=torch.int32)
+        # Identity index map: ``sample_indices`` walks back through these and
+        # always lands on particle 0 (the only row actually written).
+        pt.indices = torch.arange(n_particles, dtype=torch.int32) \
+            .unsqueeze(0).repeat(n_steps, 1)
+        pt.no_live_particles = torch.full([n_steps], n_particles, dtype=torch.int32)
         pt.loss = torch.zeros([n_particles, n_steps], dtype=torch.float32)
         self._particle_trajectories = pt
-        self._weights = np.ones([n_particles])
 
     def reset(self) -> None:
-        """Zero out the per-cycle particle-filter buffers."""
+        """Zero out the per-cycle trajectory buffer (preserves index map)."""
         self._particle_trajectories.particles.zero_()
-        self._particle_trajectories.indices.zero_()
-        self._particle_trajectories.no_live_particles.zero_()
+        self._particle_trajectories.gripper_particles.zero_()
         self._particle_trajectories.loss.zero_()
-        self._weights = np.ones([self.params.no_particles])
 
     # ------------------------------------------------------------------
     # Main planning loop
     # ------------------------------------------------------------------
 
     def optimise(self) -> ParticleTrajectories:
-        """Run one planning cycle of ``no_steps`` particle-filter integrations.
+        """Run one planning cycle of ``no_steps`` gradient-descent integrations.
 
         Raises:
             RuntimeError: if ``set_hole_positions`` was never called.
@@ -452,78 +455,62 @@ class DualAssembly(TrajOptBase):
         # resolved here so the rest of the rollout runs in the right state.
         self._evaluate_idle_transitions()
 
-        # Seed every particle with the current robot baseline.
-        for i in range(self.params.no_particles):
-            self._particle_trajectories.particles[i, 0, :] = self._x
-            self._particle_trajectories.gripper_particles[i, 0, 0] = float(self._gripper_closed[0])
-            self._particle_trajectories.gripper_particles[i, 0, 1] = float(self._gripper_closed[1])
+        # Seed step 0 with the current robot baseline (broadcast across the
+        # particle dim — see initialise() docstring).
+        self._particle_trajectories.particles[:, 0, :] = self._x
+        self._particle_trajectories.gripper_particles[:, 0, 0] = float(self._gripper_closed[0])
+        self._particle_trajectories.gripper_particles[:, 0, 1] = float(self._gripper_closed[1])
 
-        # Inner particle-filter loop. Identical structure to dual_assembly.py
-        # so the consumer sees the same trajectory shape.
+        # Single deterministic gradient-descent rollout.
         for k in range(1, self.params.no_steps):
-            for n in range(self.params.no_particles):
-                self._states.requires_grad()
-                gradients = self._step_gradients()
+            self._states.requires_grad()
+            gradients = self._step_gradients()
 
-                # Apply gradient with per-arm velocity limiting.
-                delta_l = self._limit_ee_delta(LEARNING_RATE * gradients.left_pose)
-                delta_r = self._limit_ee_delta(LEARNING_RATE * gradients.right_pose)
-                self._states.left_pose  = self._states.left_pose  - delta_l
-                self._states.right_pose = self._states.right_pose - delta_r
-                self._states.beam_poses = self._states.beam_poses - LEARNING_RATE * gradients.beam_poses
-                self._states.pregrasp   = self._states.pregrasp   - LEARNING_RATE * gradients.pregrasp
+            # Apply gradient with per-arm velocity limiting.
+            delta_l = self._limit_ee_delta(LEARNING_RATE * gradients.left_pose)
+            delta_r = self._limit_ee_delta(LEARNING_RATE * gradients.right_pose)
+            self._states.left_pose  = self._states.left_pose  - delta_l
+            self._states.right_pose = self._states.right_pose - delta_r
+            self._states.beam_poses = self._states.beam_poses - LEARNING_RATE * gradients.beam_poses
+            self._states.pregrasp   = self._states.pregrasp   - LEARNING_RATE * gradients.pregrasp
 
-                # Enforce workspace bounds (z, y) for each arm plus pregrasp z.
-                self._clamp_ee_poses()
+            # Enforce workspace bounds (z, y) for each arm plus pregrasp z.
+            self._clamp_ee_poses()
 
-                self._states.detach()
+            self._states.detach()
 
-                self._particle_trajectories.loss[n, k] = self._beam_losses_bank._beam_losses.sum()
+            self._particle_trajectories.loss[:, k] = self._beam_losses_bank._beam_losses.sum()
 
-                # Repack flat _x and renormalise yaw / clip z.
-                self._x = torch.cat(
-                    [
-                        self._states.left_pose.reshape(-1),
-                        self._states.right_pose.reshape(-1),
-                        self._states.beam_poses.reshape(-1),
-                        self._states.pregrasp.reshape(-1),
-                    ],
-                    dim=0,
-                )
-                pose_block = (self._state_params.no_beams * 2 + self._state_params.no_hands) * self.state_dim
-                self._x[0:pose_block] = self._normalise_pose(self._x[0:pose_block])
+            # Repack flat _x and renormalise yaw / clip z.
+            self._x = torch.cat(
+                [
+                    self._states.left_pose.reshape(-1),
+                    self._states.right_pose.reshape(-1),
+                    self._states.beam_poses.reshape(-1),
+                    self._states.pregrasp.reshape(-1),
+                ],
+                dim=0,
+            )
+            pose_block = (self._state_params.no_beams * 2 + self._state_params.no_hands) * self.state_dim
+            self._x[0:pose_block] = self._normalise_pose(self._x[0:pose_block])
 
-                # Sync the (possibly z-clipped) pregrasp back into states so the
-                # next gradient step starts from the clipped value.
-                pg_start = (self._state_params.no_hands + self._state_params.no_beams) * self.state_dim
-                self._states.pregrasp = self._x[
-                    pg_start : pg_start + self._state_params.no_beams * self.state_dim
-                ].view(self._state_params.no_beams, self.state_dim).detach()
-                self._states.pregrasp.requires_grad_(True)
+            # Sync the (possibly z-clipped) pregrasp back into states so the
+            # next gradient step starts from the clipped value.
+            pg_start = (self._state_params.no_hands + self._state_params.no_beams) * self.state_dim
+            self._states.pregrasp = self._x[
+                pg_start : pg_start + self._state_params.no_beams * self.state_dim
+            ].view(self._state_params.no_beams, self.state_dim).detach()
+            self._states.pregrasp.requires_grad_(True)
 
-                self._particle_trajectories.particles[n, k, :] = self._x
-                self._particle_trajectories.gripper_particles[n, k, 0] = float(self._gripper_closed[0])
-                self._particle_trajectories.gripper_particles[n, k, 1] = float(self._gripper_closed[1])
+            self._particle_trajectories.particles[:, k, :] = self._x
+            self._particle_trajectories.gripper_particles[:, k, 0] = float(self._gripper_closed[0])
+            self._particle_trajectories.gripper_particles[:, k, 1] = float(self._gripper_closed[1])
 
-                # Collision filtering removed — every particle is treated as
-                # live with uniform weight. ``self.sim``, ``self._mu_model``,
-                # and ``self._mu_data`` are retained on the instance for the
-                # constructor signature but are no longer consulted here.
-                self._weights[n] = 1.0
-                self._particle_trajectories.no_live_particles[k] += 1
-
-                # Re-evaluate the gradient-driven transition gates against the
-                # latest losses so the FSM can advance mid-rollout.
-                self._hand_losses.calc_losses(self._states)
-                self._hand_losses.calc_prob()
-                self._evaluate_step_transitions()
-
-            # Resample particles to keep collision-free trajectories.
-            self._weights /= self._weights.sum()
-            indices = systematic_resample(self._weights)
-            self._particle_trajectories.particles[:, k, :] = self._particle_trajectories.particles[indices, k, :]
-            self._particle_trajectories.gripper_particles[:, k, :] = self._particle_trajectories.gripper_particles[indices, k, :]
-            self._particle_trajectories.indices[k] = torch.tensor(indices)
+            # Re-evaluate the gradient-driven transition gates against the
+            # latest losses so the FSM can advance mid-rollout.
+            self._hand_losses.calc_losses(self._states)
+            self._hand_losses.calc_prob()
+            self._evaluate_step_transitions()
 
         # Step-mode: pause on every FSM state transition so a developer can
         # inspect the system state before the next planning cycle.  Activated
@@ -824,6 +811,11 @@ class DualAssembly(TrajOptBase):
         self._beam_losses_bank.calc_losses(self._states)
         self._pregrasp_losses_bank.calc_losses(self._states)
 
+        # Clear stale snap-fired flags so a non-DESCENDING cycle never
+        # appears to have fired. ``_grad_descending`` is the only producer.
+        self._descent_snap_fired_l = False
+        self._descent_snap_fired_r = False
+
         s = self._state
         if s == State.GO_HOME:
             self._grad_go_home()
@@ -897,12 +889,14 @@ class DualAssembly(TrajOptBase):
         g_l = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
         g_r = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
 
-        # Snap: inside descent_snap_radius replace the quadratic gradient with
-        # one whose integrator step lands the planner state exactly on the
+        # Snap: inside descent_snap_radius replace the quadratic gradient
+        # with one whose integrator step lands the planner state on the
         # target.  delta = LEARNING_RATE · g  →
         # set g = (x - x*) / LEARNING_RATE  so delta = (x - x*) and
-        # x_new = x - delta = x*.  max_ee_step still clips the result if it
-        # would exceed the per-step displacement cap.
+        # x_new = x - delta = x*.  ``_limit_ee_delta`` and ``_clamp_ee_poses``
+        # still apply — they remain the single source of truth for workspace
+        # bounds and per-step displacement caps, and we deliberately do not
+        # bypass them here.
         self._descent_snap_fired_l = False
         self._descent_snap_fired_r = False
         snap_r = self.descent_snap_radius
@@ -1065,7 +1059,7 @@ class DualAssembly(TrajOptBase):
         """
         no_items = pose_torch.shape[0] // self.state_dim
         for k in range(no_items):
-            z_min = 0.805
+            z_min = 0.75
             if k < self._state_params.no_hands and self.arm_z_floor is not None:
                 z_min = max(z_min, self.arm_z_floor)
             pose_torch[self.state_dim * k + 2] = max(pose_torch[self.state_dim * k + 2], z_min)

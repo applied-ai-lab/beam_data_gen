@@ -114,7 +114,7 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
 # Pregrasp gate: per-axis max absolute error on (x, y, z). Rotation ignored.
 # Each of |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-PREGRASP_TOL: float = 0.05
+PREGRASP_TOL: float = 0.03
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
@@ -327,6 +327,15 @@ class DualAssembly(TrajOptBase):
         self._descent_loss_l: float = float('inf')
         self._descent_loss_r: float = float('inf')
 
+        # Whether the descent-snap branch fired in the most recent
+        # ``_grad_descending`` call (per arm), and a cumulative count of
+        # how many times it has fired since planner construction. Read by
+        # frank_atls.publish_planner_diagnostics.
+        self._descent_snap_fired_l: bool = False
+        self._descent_snap_fired_r: bool = False
+        self._descent_snap_count_l: int = 0
+        self._descent_snap_count_r: int = 0
+
         # ---- Hole perception. MUST be set before optimise(). ----
         self._hole_positions: Optional[np.ndarray] = None
         self._hole_pairs: List[Tuple[int, int]] = list(hole_pairs)
@@ -496,27 +505,12 @@ class DualAssembly(TrajOptBase):
                 self._particle_trajectories.gripper_particles[n, k, 0] = float(self._gripper_closed[0])
                 self._particle_trajectories.gripper_particles[n, k, 1] = float(self._gripper_closed[1])
 
-                # Optional collision filtering against moving beams.
-                _collided = False
-                if self.sim is not None:
-                    self.sim.decode_x(
-                        self._mu_data,
-                        self._x[0 : (self._state_params.no_hands + self._state_params.no_beams) * self.state_dim].unsqueeze(0),
-                    )
-                    mujoco.mj_step(self._mu_model, self._mu_data)
-                    if self._left_index is not None and self.sim.check_collisions(
-                        self._mu_data, self.node_names[self._left_index]
-                    ):
-                        _collided = True
-                    if self._right_index is not None and self.sim.check_collisions(
-                        self._mu_data, self.node_names[self._right_index]
-                    ):
-                        _collided = True
-                if _collided:
-                    self._weights[n] = 1.0e-5
-                else:
-                    self._weights[n] = 1.0
-                    self._particle_trajectories.no_live_particles[k] += 1
+                # Collision filtering removed — every particle is treated as
+                # live with uniform weight. ``self.sim``, ``self._mu_model``,
+                # and ``self._mu_data`` are retained on the instance for the
+                # constructor signature but are no longer consulted here.
+                self._weights[n] = 1.0
+                self._particle_trajectories.no_live_particles[k] += 1
 
                 # Re-evaluate the gradient-driven transition gates against the
                 # latest losses so the FSM can advance mid-rollout.
@@ -869,25 +863,18 @@ class DualAssembly(TrajOptBase):
         self._gradients.pregrasp = grad(pg_loss, self._states.pregrasp, retain_graph=True)[0]
 
     def _grad_descending(self) -> None:
-        """Drive each arm to its grasp target: beam (x, y, yaw) at fixed ``self.grasp_z``.
+        """Drive each arm to the perceived beam pose (x, y, z, yaw).
 
-        The target z is ``self.grasp_z`` (default 0.81 m), regardless of the perceived
-        beam z.  This makes the descent deterministic — the arm always ends at the same
-        height — and avoids relying on the AprilTag z estimate, which is the noisiest
-        component of the pose.
-
-        We also cache the position-only squared distance to the fixed-z target in
-        ``_descent_loss_l / _descent_loss_r`` so that ``_grasp_contact`` can gate on
-        the *correct* target rather than the raw beam z.
+        The descent target now follows the perceived beam z directly — the
+        previous fixed ``self.grasp_z`` override has been removed so the arms
+        track the AprilTag z estimate rather than asymptoting to a hardcoded
+        height that sits above the actual beam top.
         """
         if self._left_index is None or self._right_index is None:
             return
 
         def _target(beam_idx: int) -> torch.Tensor:
-            """Beam pose with z replaced by self.grasp_z (detached — not optimised)."""
-            t = self._states.beam_poses[beam_idx].detach().clone()
-            t[2] = self.grasp_z
-            return t
+            return self._states.beam_poses[beam_idx].detach().clone()
 
         left_target  = _target(self._left_index)
         right_target = _target(self._right_index)
@@ -916,13 +903,19 @@ class DualAssembly(TrajOptBase):
         # set g = (x - x*) / LEARNING_RATE  so delta = (x - x*) and
         # x_new = x - delta = x*.  max_ee_step still clips the result if it
         # would exceed the per-step displacement cap.
+        self._descent_snap_fired_l = False
+        self._descent_snap_fired_r = False
         snap_r = self.descent_snap_radius
         if snap_r > 0.0 and LEARNING_RATE > 0.0:
             with torch.no_grad():
                 if 0.0 < dist_l < snap_r:
                     g_l = (self._states.left_pose  - left_target).detach()  / LEARNING_RATE
+                    self._descent_snap_fired_l = True
+                    self._descent_snap_count_l += 1
                 if 0.0 < dist_r < snap_r:
                     g_r = (self._states.right_pose - right_target).detach() / LEARNING_RATE
+                    self._descent_snap_fired_r = True
+                    self._descent_snap_count_r += 1
 
         self._gradients.left_pose  = g_l
         self._gradients.right_pose = g_r

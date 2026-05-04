@@ -118,10 +118,10 @@ PREGRASP_TOL: float = 0.03
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-GRASP_POS_TOL: float = 0.005
+GRASP_POS_TOL: float = 0.010
 
 # Per-pair assembly convergence (Euclidean hole distance).
-HOLE_CONVERGENCE_THRESHOLD: float = 0.005
+HOLE_CONVERGENCE_THRESHOLD: float = 0.003
 
 # Cycles a pair must stay below the hole threshold before being latched.
 CONVERGENCE_HYSTERESIS: int = 5
@@ -130,7 +130,7 @@ CONVERGENCE_HYSTERESIS: int = 5
 # end-effector position and its assigned beam position; if exceeded for the
 # given number of consecutive steps the grasp is considered failed.
 ASSEMBLE_SLIP_DIST: float = 0.05      # 5 cm
-ASSEMBLE_SLIP_STEPS: int  = 30
+ASSEMBLE_SLIP_STEPS: int  = 15
 
 # Per-state step budgets. The planner runs at ~30 Hz so 150 ≈ 5 s.
 DESCEND_TIMEOUT_STEPS:  int = 100
@@ -142,13 +142,13 @@ MOVE_UP_TOL: float = 0.05
 
 # Gradient mixing — kept identical to dual_assembly.py for behavioural parity
 # in the assembly phase.
-HOLE_GRADIENT_WEIGHT: float = 0.3
-YAW_GRADIENT_WEIGHT:  float = 1.0
+HOLE_GRADIENT_WEIGHT: float = 0.1
+YAW_GRADIENT_WEIGHT:  float = 1.5
 
 # Gradient-descent learning rate. Hard-coded here (instead of read from
 # TrajOptParams.step_size) so the planner's integrator step is fixed by the
 # module rather than by callers.
-LEARNING_RATE: float = 0.4
+LEARNING_RATE: float = 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +307,7 @@ class DualAssembly(TrajOptBase):
 
         # Fixed z height the arms descend to in DESCENDING, regardless of the
         # perceived beam z.  Set to sit the gripper at beam surface height.
-        self.grasp_z: float = 0.81
+        self.grasp_z: float = 0.793
 
         # Inside this radius (m) of the descent target the gradient is replaced
         # by one whose integrator step lands the planner state exactly on the

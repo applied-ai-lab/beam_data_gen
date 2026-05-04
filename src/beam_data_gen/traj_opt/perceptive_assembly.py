@@ -186,6 +186,14 @@ PIN_GRASP_COS: float = 1.0
 INWARD_YAW_LEFT_SIN: float = -1.0
 INWARD_YAW_LEFT_COS: float = 0.0
 
+# Pin-phase home offset (m).  Both arms park at the beam-phase home
+# shifted this far further from the workspace centreline (y = 0) before
+# the PTU is commanded to PIN_VIEW: the left arm's y is increased by
+# this amount, the right arm's y is decreased by the same.  Gives the
+# camera an unobstructed view and keeps the right arm well clear of the
+# left arm's working volume during pin insertion.
+PIN_HOME_Y_OFFSET: float = 0.10
+
 
 # ---------------------------------------------------------------------------
 # State enum
@@ -210,7 +218,7 @@ class State(IntEnum):
     DONE             = 11  # idle loop: all pairs converged, re-enters PICK_TASK on perturbation
 
     # ---- Pin insertion phase (single-arm; right held at right_start). ----
-    STOW_RIGHT             = 12  # right→right_start, left holds; entered when all beams converged
+    STOW_BOTH              = 12  # both arms → pin-phase home; entered the moment beams converge, before PTU moves
     PICK_PIN               = 13  # greedy assignment: closest pin → closest unfilled pair
     MOVE_TO_PIN_PREGRASP   = 14  # left hovers above pin, yaw = 0
     DESCEND_TO_PIN         = 15  # left descends to pin, yaw = 0
@@ -331,6 +339,16 @@ class DualAssembly(TrajOptBase):
         self.left_start = left_start
         self.right_start = right_start
 
+        # Pin-phase home: same pose as the beam-phase home, shifted
+        # PIN_HOME_Y_OFFSET further away from the workspace centreline.
+        # Convention: left arm sits at +y, right at -y, so the offset is
+        # added on the left and subtracted on the right.  Both arms drive
+        # to this pose during STOW_BOTH before the PTU is moved.
+        self._left_pin_home  = left_start.detach().clone()
+        self._right_pin_home = right_start.detach().clone()
+        self._left_pin_home[1]  = self._left_pin_home[1]  + PIN_HOME_Y_OFFSET
+        self._right_pin_home[1] = self._right_pin_home[1] - PIN_HOME_Y_OFFSET
+
         # ---- Public read-only fields the callers depend on. ----
         self._left_index: Optional[int] = None
         self._right_index: Optional[int] = None
@@ -409,10 +427,10 @@ class DualAssembly(TrajOptBase):
         self._pin_insert_counter: int = 0
         # Monotonic counter, incremented on every ``set_pin_positions``
         # call.  ``_pin_phase_entry_counter`` snapshots it on entering
-        # STOW_RIGHT so the FSM can wait for a *fresh* pin observation —
+        # STOW_BOTH so the FSM can wait for a *fresh* pin observation —
         # one that arrived after pin phase was entered, hence after the
         # PTU was commanded to its pin-view pose and the AprilTag detector
-        # re-acquired the pins.  Without this gate, STOW_RIGHT could exit
+        # re-acquired the pins.  Without this gate, STOW_BOTH could exit
         # using stale coordinates cached from before the PTU moved.
         self._pin_update_counter: int = 0
         self._pin_phase_entry_counter: int = -1
@@ -456,6 +474,24 @@ class DualAssembly(TrajOptBase):
             self._pin_inserted = [False] * positions.shape[0]
         self._pin_positions = positions
         self._pin_update_counter += 1
+
+    def is_pin_view_pose_required(self) -> bool:
+        """Whether the PTU should be commanded to its PIN_VIEW pose.
+
+        True once both arms have parked at the pin-phase home (within
+        STOW_BOTH) and remains True for the rest of pin phase, except
+        ALL_DONE.  False during beam phase and during STOW_BOTH while
+        the arms are still moving — the camera should not slew to track
+        pins while the arms are still settling into their pin-phase
+        home.
+        """
+        if not self._pin_phase_active:
+            return False
+        if self._state == State.ALL_DONE:
+            return False
+        if self._state == State.STOW_BOTH:
+            return self._at_pin_home()
+        return True
 
     @property
     def states(self) -> DualArmStates:
@@ -517,15 +553,16 @@ class DualAssembly(TrajOptBase):
         """Run one planning cycle of ``no_steps`` gradient-descent integrations.
 
         Raises:
-            RuntimeError: if ``set_hole_positions`` was never called, or if
-                pin phase is active and ``set_pin_positions`` has not been
-                called this cycle.
+            RuntimeError: if ``set_hole_positions`` was never called.
+
+        Pin observations are *not* required for ``optimise()`` to run. Pin
+        phase is entered the moment beams converge — typically before the
+        PTU has moved to its pin-view pose, so pins are out of FOV and
+        ``_pin_positions`` is still ``None``.  The FSM holds in
+        ``STOW_BOTH`` (zero progression toward any pin) until a fresh
+        observation arrives via ``set_pin_positions``; safe to call
+        ``optimise`` repeatedly meanwhile.
         """
-        if self._pin_phase_active and self._pin_positions is None:
-            raise RuntimeError(
-                "Pin phase is active but set_pin_positions(...) has not "
-                "been called."
-            )
         if self._hole_positions is None:
             raise RuntimeError(
                 "set_hole_positions(...) must be called before optimise()."
@@ -837,14 +874,17 @@ class DualAssembly(TrajOptBase):
                 self._enter_pick_task()
 
         # ---- Pin phase ----
-        elif self._state == State.STOW_RIGHT:
-            # Wait for both the right arm to be parked AND a fresh pin
-            # observation post-pin-phase-entry.  The latter prevents acting
-            # on stale pin TFs cached from before the PTU was commanded
-            # to PIN_VIEW — see ``_pin_phase_entry_counter``.
+        elif self._state == State.STOW_BOTH:
+            # Wait for both arms to park at the pin-phase home AND a
+            # fresh pin observation post-pin-phase-entry.  Only after both
+            # conditions hold does the FSM advance to PICK_PIN — at which
+            # point the PTU will already have been commanded to PIN_VIEW
+            # (the trigger fires once we leave STOW_BOTH) and a fresh
+            # observation will have been delivered, so PICK_PIN runs on
+            # real data.
             fresh_pins = (self._pin_update_counter
                           > self._pin_phase_entry_counter)
-            if self._right_at_home() and fresh_pins:
+            if self._at_pin_home() and fresh_pins:
                 self._goto(State.PICK_PIN)
                 self._evaluate_idle_transitions()  # resolve PICK_PIN
 
@@ -941,16 +981,16 @@ class DualAssembly(TrajOptBase):
             # Beams done → pin phase, unconditionally.  We do *not* require
             # that pin TFs have already been observed: the PTU is parked at
             # HOME during beam phase, so pins are typically out of FOV at
-            # this exact moment.  STOW_RIGHT parks the right arm at
+            # this exact moment.  STOW_BOTH parks the right arm at
             # right_start (which also frees the PTU command, see
             # FrankAtls.publish_planner_diagnostics → PTU goes to PIN_VIEW)
             # and waits for a fresh pin observation via the
             # ``_pin_phase_entry_counter`` gate before advancing to
-            # PICK_PIN.  The left arm holds during STOW_RIGHT, so it cannot
+            # PICK_PIN.  The left arm holds during STOW_BOTH, so it cannot
             # move toward a pin it has never seen.
             self._pin_phase_active = True
             self._pin_phase_entry_counter = self._pin_update_counter
-            self._goto(State.STOW_RIGHT)
+            self._goto(State.STOW_BOTH)
             return
 
         self._active_pair_idx = pair_idx
@@ -1027,7 +1067,7 @@ class DualAssembly(TrajOptBase):
         elif s == State.DUAL_ASSEMBLE:
             self._grad_dual_assemble()
         elif s in (
-            State.STOW_RIGHT,
+            State.STOW_BOTH,
             State.MOVE_TO_PIN_PREGRASP,
             State.DESCEND_TO_PIN,
             State.LIFT_PIN,
@@ -1207,26 +1247,28 @@ class DualAssembly(TrajOptBase):
     # ------------------------------------------------------------------
 
     def _grad_pin_phase(self) -> None:
-        """Single-arm pin-phase controller.
+        """Pin-phase controller.
 
-        Right arm always pursues ``right_start`` (mirrors ``_grad_go_home``)
-        for the entire pin phase.  Left arm pursues a state-specific target
-        built by ``_left_target_for_state``; in ``STOW_RIGHT`` the left arm
-        is held (zero gradient).
+        Right arm always pursues ``_right_pin_home`` for the entire pin
+        phase (the beam-phase home shifted by ``PIN_HOME_Y_OFFSET`` away
+        from y = 0).  Left arm pursues a state-specific target built by
+        ``_left_target_for_state``; in ``STOW_BOTH`` the left target is
+        ``_left_pin_home`` so both arms park at the pin-phase home before
+        the PTU is commanded to PIN_VIEW.
 
         Snap branch reuses ``descent_snap_radius`` for ``DESCEND_TO_PIN``
         and ``assemble_snap_radius`` for ``INSERT_PIN`` so the pin pickup /
         insertion gradient lands exactly on the target inside the radius
         (same trick as ``_grad_descending``).
         """
-        loss_r = ((self._states.right_pose - self.right_start) ** 2).sum()
+        loss_r = ((self._states.right_pose - self._right_pin_home) ** 2).sum()
         self._gradients.right_pose = grad(
             loss_r, self._states.right_pose, retain_graph=True
         )[0]
 
         target = self._left_target_for_state()
         if target is None:
-            return  # STOW_RIGHT or missing data → left holds
+            return  # missing perception → left holds
 
         loss_l = ((self._states.left_pose - target) ** 2).sum()
         g_l = grad(loss_l, self._states.left_pose, retain_graph=True)[0]
@@ -1249,8 +1291,8 @@ class DualAssembly(TrajOptBase):
     def _left_target_for_state(self) -> Optional[torch.Tensor]:
         """Build the 5-DOF left-arm target for the current pin-phase state.
 
-        Returns ``None`` when the active state has no left-arm target
-        (STOW_RIGHT) or when required perception is missing.
+        Returns ``None`` when required perception is missing — the
+        gradient producer interprets that as "left holds".
         """
         s = self._state
         device = self.params.device
@@ -1261,8 +1303,10 @@ class DualAssembly(TrajOptBase):
                 dtype=torch.float32, device=device,
             )
 
-        if s == State.STOW_RIGHT:
-            return None  # left holds
+        if s == State.STOW_BOTH:
+            # Drive left to the pin-phase home; right is independently
+            # pulled there by ``_grad_pin_phase``'s right loss.
+            return self._left_pin_home.detach().clone()
 
         if s in (State.MOVE_TO_PIN_PREGRASP, State.DESCEND_TO_PIN):
             if self._active_pin_idx is None or self._pin_positions is None:
@@ -1334,10 +1378,14 @@ class DualAssembly(TrajOptBase):
 
     # ---- Pin-phase gates ----
 
-    def _right_at_home(self) -> bool:
-        d = float(((self._states.right_pose[:3] - self.right_start[:3]) ** 2)
-                  .sum().sqrt())
-        return d < MOVE_UP_TOL
+    def _at_pin_home(self) -> bool:
+        """Both arms within ``MOVE_UP_TOL`` (Euclidean, position only) of
+        their pin-phase home pose."""
+        dl = float(((self._states.left_pose[:3]  - self._left_pin_home[:3])  ** 2)
+                   .sum().sqrt())
+        dr = float(((self._states.right_pose[:3] - self._right_pin_home[:3]) ** 2)
+                   .sum().sqrt())
+        return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
 
     def _pin_pregrasp_reached(self) -> bool:
         if self._active_pin_idx is None or self._pin_positions is None:

@@ -407,6 +407,15 @@ class DualAssembly(TrajOptBase):
         self._active_hole_pair_idx: Optional[int] = None
         self._pin_phase_active: bool = False
         self._pin_insert_counter: int = 0
+        # Monotonic counter, incremented on every ``set_pin_positions``
+        # call.  ``_pin_phase_entry_counter`` snapshots it on entering
+        # STOW_RIGHT so the FSM can wait for a *fresh* pin observation —
+        # one that arrived after pin phase was entered, hence after the
+        # PTU was commanded to its pin-view pose and the AprilTag detector
+        # re-acquired the pins.  Without this gate, STOW_RIGHT could exit
+        # using stale coordinates cached from before the PTU moved.
+        self._pin_update_counter: int = 0
+        self._pin_phase_entry_counter: int = -1
 
         # ---- Testing / diagnostics knobs. ----
         # Set step_mode = True to pause at every FSM state transition and wait
@@ -446,6 +455,7 @@ class DualAssembly(TrajOptBase):
         if self._pin_positions is None:
             self._pin_inserted = [False] * positions.shape[0]
         self._pin_positions = positions
+        self._pin_update_counter += 1
 
     @property
     def states(self) -> DualArmStates:
@@ -828,7 +838,13 @@ class DualAssembly(TrajOptBase):
 
         # ---- Pin phase ----
         elif self._state == State.STOW_RIGHT:
-            if self._right_at_home():
+            # Wait for both the right arm to be parked AND a fresh pin
+            # observation post-pin-phase-entry.  The latter prevents acting
+            # on stale pin TFs cached from before the PTU was commanded
+            # to PIN_VIEW — see ``_pin_phase_entry_counter``.
+            fresh_pins = (self._pin_update_counter
+                          > self._pin_phase_entry_counter)
+            if self._right_at_home() and fresh_pins:
                 self._goto(State.PICK_PIN)
                 self._evaluate_idle_transitions()  # resolve PICK_PIN
 
@@ -929,6 +945,11 @@ class DualAssembly(TrajOptBase):
                     and not all(self._pin_inserted)
                     and self._pin_inserted):  # non-empty → at least one pin known
                 self._pin_phase_active = True
+                # Snapshot the current pin-update counter; STOW_RIGHT must
+                # wait for a fresh pin observation (counter strictly greater)
+                # before progressing — otherwise we'd act on coordinates
+                # cached from before the PTU was commanded to PIN_VIEW.
+                self._pin_phase_entry_counter = self._pin_update_counter
                 self._goto(State.STOW_RIGHT)
                 return
             # Drive arms back to start posture before idling so they do not

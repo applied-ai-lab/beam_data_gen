@@ -144,7 +144,7 @@ MOVE_UP_Z: float = 1.0
 # Gradient mixing — kept identical to dual_assembly.py for behavioural parity
 # in the assembly phase.
 HOLE_GRADIENT_WEIGHT: float = 0.0
-YAW_GRADIENT_WEIGHT:  float = 1.0
+YAW_GRADIENT_WEIGHT:  float = 1.2
 
 # Gradient-descent learning rate. Hard-coded here (instead of read from
 # TrajOptParams.step_size) so the planner's integrator step is fixed by the
@@ -155,7 +155,7 @@ LEARNING_RATE: float = 0.25
 # by one whose integrator step lands exactly on the target, bypassing the
 # asymptotic shrinkage of a quadratic loss. Set to 0.0 to disable.
 DESCENT_SNAP_RADIUS:  float = 0.04
-ASSEMBLE_SNAP_RADIUS: float = 0.04
+ASSEMBLE_SNAP_RADIUS: float = 0.03
 import os as _os
 if _os.environ.get('DISABLE_ASSEMBLE_SNAP', '0') == '1':
     ASSEMBLE_SNAP_RADIUS = 0.0
@@ -179,7 +179,7 @@ PIN_CONVERGENCE_HYSTERESIS: int = 1
 PIN_YAW_TOL: float = 0.1
 
 # Hover height above pin / hole-midpoint during pin pregrasp (m).
-PIN_PREGRASP_OFFSET_Z: float = 0.20
+PIN_PREGRASP_OFFSET_Z: float = 0.16
 
 # Pregrasp / grasp yaw is forced to 0 during pin pickup —
 # (sin θ, cos θ) = (0, 1).

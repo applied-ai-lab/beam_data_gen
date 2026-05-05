@@ -483,19 +483,17 @@ class DualAssembly(TrajOptBase):
     def is_pin_view_pose_required(self) -> bool:
         """Whether the PTU should be commanded to its PIN_VIEW pose.
 
-        True once both arms have parked at the pin-phase home (within
-        STOW_BOTH) and remains True for the rest of pin phase, except
-        ALL_DONE.  False during beam phase and during STOW_BOTH while
-        the arms are still moving — the camera should not slew to track
-        pins while the arms are still settling into their pin-phase
-        home.
+        True for the entire pin phase from STOW_BOTH entry onward, so
+        the camera slews to PIN_VIEW in parallel with the arms moving
+        to their pin-phase home.  This lets the AprilTag pipeline start
+        producing fresh pin detections before STOW_BOTH's exit gate
+        (``_at_pin_home() AND fresh_pins``) is even checked.  False
+        during beam phase and on ALL_DONE.
         """
         if not self._pin_phase_active:
             return False
         if self._state == State.ALL_DONE:
             return False
-        if self._state == State.STOW_BOTH:
-            return self._at_pin_home()
         return True
 
     @property

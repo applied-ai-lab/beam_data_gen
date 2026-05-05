@@ -167,13 +167,17 @@ PIN_INSERTION_SNAP_RADIUS:  float = 0.10   # INSERT_PIN snap
 # Pin-phase tunables (see PERCEPTIVE_ASSEMBLY.MD §10).
 # ---------------------------------------------------------------------------
 
-# Per-pair Euclidean (xy) tolerance for pin insertion convergence — the
-# "8 mm regrasp loop": below this, RELEASE_PIN may fire; above it, the
-# planner forces a recovery + regrasp instead of releasing.
-PIN_INSERT_TOL: float = 0.00
+# Pin-insertion success criterion.  Insertion succeeds when the pin EE
+# is at the hole-pair midpoint in *both* z (primary — confirms the pin
+# has descended into the hole) and xy (sanity check that we're over the
+# right hole).  No retry / recovery: on the next planning cycle after
+# success the FSM advances to RELEASE_PIN unconditionally.
+PIN_INSERT_Z_TOL: float = 0.01     # 1 cm — z alignment with hole surface
+PIN_INSERT_TOL:   float = 0.01     # 1 cm — xy alignment with hole midpoint
 PIN_INSERT_PREGRASP_TOL: float = 0.005
 
-# Cycles the pin must remain inside PIN_INSERT_TOL before RELEASE_PIN fires.
+# Cycles the pin must remain inside the success criterion before
+# RELEASE_PIN fires.
 PIN_CONVERGENCE_HYSTERESIS: int = 1
 
 # Yaw gate for ROTATE_PIN_INWARD (rad).
@@ -1021,28 +1025,15 @@ class DualAssembly(TrajOptBase):
                 self._goto(State.INSERT_PIN)
 
         elif self._state == State.INSERT_PIN:
-            # Convergence — the "8 mm regrasp loop" entry point. RELEASE_PIN
-            # is reachable ONLY from here; every other exit forces recovery.
+            # Linear pipeline — no retry.  The only exit is success
+            # (z and xy both at the hole-pair midpoint).  Slip detection
+            # and timeout removed by design: try the insert, release,
+            # move on to the next pin regardless of how cleanly the
+            # mate seated.
             if (not skip_distance) and self._check_pin_insert_progress():
-                self._slip_counter = 0
                 self._goto(State.RELEASE_PIN)
                 self._evaluate_idle_transitions()  # opens left, → RETREAT_PIN
                 return
-            if not check_distance_only:
-                if self._pin_slipped():
-                    self._slip_counter += 1
-                else:
-                    self._slip_counter = 0
-                if self._slip_counter >= ASSEMBLE_SLIP_STEPS:
-                    self._slip_counter = 0
-                    self._pin_insert_counter = 0
-                    self._goto(State.PIN_RECOVERY_RELEASE)
-                    self._evaluate_idle_transitions()
-                    return
-                if self._state_step >= ASSEMBLE_TIMEOUT_STEPS:
-                    self._pin_insert_counter = 0
-                    self._goto(State.PIN_RECOVERY_RELEASE)
-                    self._evaluate_idle_transitions()
 
         elif self._state == State.RETREAT_PIN:
             if (not skip_distance) and self._left_lift_reached():
@@ -1589,32 +1580,26 @@ class DualAssembly(TrajOptBase):
 
     def _check_pin_insert_progress(self) -> bool:
         """Advance / reset the insert hysteresis counter and return True
-        when the pin has stayed inside ``PIN_INSERT_TOL`` of the hole-pair
-        midpoint for ``PIN_CONVERGENCE_HYSTERESIS`` consecutive steps.
+        when the pin EE has reached the hole-pair midpoint in z (primary
+        — confirms the pin has descended into the hole) AND xy (sanity)
+        for ``PIN_CONVERGENCE_HYSTERESIS`` consecutive steps.
 
-        This is the gate that controls the "8 mm regrasp loop": only when
-        this returns True does ``RELEASE_PIN`` fire; otherwise the planner
-        is forced through recovery and re-grasps the pin.
+        Sole exit gate from ``INSERT_PIN``: there is no slip / timeout
+        recovery path.  Once this returns True the FSM advances to
+        ``RELEASE_PIN`` and the pipeline moves on to the next pin.
         """
         if self._active_hole_pair_idx is None or self._hole_positions is None:
             return False
         a, b = self._hole_pairs[self._active_hole_pair_idx]
-        mid_xy = 0.5 * (self._hole_positions[a, :2] + self._hole_positions[b, :2])
-        ee_xy = self._states.left_pose[:2].detach().cpu().numpy()
-        d = float(np.linalg.norm(ee_xy - mid_xy))
-        if d < PIN_INSERT_TOL:
+        mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+        ee = self._states.left_pose[:3].detach().cpu().numpy()
+        z_err  = abs(float(ee[2]) - float(mid[2]))
+        xy_err = float(np.linalg.norm(ee[:2] - mid[:2]))
+        if z_err < PIN_INSERT_Z_TOL and xy_err < PIN_INSERT_TOL:
             self._pin_insert_counter += 1
         else:
             self._pin_insert_counter = 0
         return self._pin_insert_counter >= PIN_CONVERGENCE_HYSTERESIS
-
-    def _pin_slipped(self) -> bool:
-        if self._active_hole_pair_idx is None or self._hole_positions is None:
-            return False
-        a, b = self._hole_pairs[self._active_hole_pair_idx]
-        mid_xy = 0.5 * (self._hole_positions[a, :2] + self._hole_positions[b, :2])
-        ee_xy = self._states.left_pose[:2].detach().cpu().numpy()
-        return float(np.linalg.norm(ee_xy - mid_xy)) > ASSEMBLE_SLIP_DIST
 
     # ------------------------------------------------------------------
     # Gates — small predicates on the latest losses.

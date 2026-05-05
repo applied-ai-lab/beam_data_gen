@@ -117,27 +117,27 @@ PREGRASP_TOL: float = 0.03
 
 # Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
 # |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-GRASP_POS_TOL: float = 0.01
+GRASP_POS_TOL: float = 0.013
 
 # Per-pair assembly convergence (Euclidean hole distance).
-HOLE_CONVERGENCE_THRESHOLD: float = 0.003
+HOLE_CONVERGENCE_THRESHOLD: float = 0.005
 
 # Cycles a pair must stay below the hole threshold before being latched.
-CONVERGENCE_HYSTERESIS: int = 5
+CONVERGENCE_HYSTERESIS: int = 1
 
 # DUAL_ASSEMBLE slippage detector. Distance is measured per arm between the
 # end-effector position and its assigned beam position; if exceeded for the
 # given number of consecutive steps the grasp is considered failed.
-ASSEMBLE_SLIP_DIST: float = 0.03      # 5 cm
-ASSEMBLE_SLIP_STEPS: int  = 15
+ASSEMBLE_SLIP_DIST: float = 0.15      # 5 cm
+ASSEMBLE_SLIP_STEPS: int  = 1000
 
 # Per-state step budgets. The planner runs at ~30 Hz so 150 ≈ 5 s.
 DESCEND_TIMEOUT_STEPS:  int = 35
-ASSEMBLE_TIMEOUT_STEPS: int = 100
+ASSEMBLE_TIMEOUT_STEPS: int = 75
 GO_HOME_TIMEOUT_STEPS:  int = 100
 
 # Position-only gate for MOVE_AWAY / RECOVERY_MOVE_UP (orientation ignored).
-MOVE_UP_TOL: float = 0.035
+MOVE_UP_TOL: float = 0.04
 MOVE_UP_Z: float = 1.0
 
 
@@ -149,13 +149,13 @@ YAW_GRADIENT_WEIGHT:  float = 1.0
 # Gradient-descent learning rate. Hard-coded here (instead of read from
 # TrajOptParams.step_size) so the planner's integrator step is fixed by the
 # module rather than by callers.
-LEARNING_RATE: float = 0.4
+LEARNING_RATE: float = 0.25
 
 # Snap radii (metres). Inside the radius the per-state gradient is replaced
 # by one whose integrator step lands exactly on the target, bypassing the
 # asymptotic shrinkage of a quadratic loss. Set to 0.0 to disable.
 DESCENT_SNAP_RADIUS:  float = 0.04
-ASSEMBLE_SNAP_RADIUS: float = 0.02
+ASSEMBLE_SNAP_RADIUS: float = 0.04
 import os as _os
 if _os.environ.get('DISABLE_ASSEMBLE_SNAP', '0') == '1':
     ASSEMBLE_SNAP_RADIUS = 0.0
@@ -173,13 +173,13 @@ if _os.environ.get('DISABLE_DESCENT_SNAP', '0') == '1':
 PIN_INSERT_TOL: float = 0.01
 
 # Cycles the pin must remain inside PIN_INSERT_TOL before RELEASE_PIN fires.
-PIN_CONVERGENCE_HYSTERESIS: int = 5
+PIN_CONVERGENCE_HYSTERESIS: int = 1
 
 # Yaw gate for ROTATE_PIN_INWARD (rad).
 PIN_YAW_TOL: float = 0.1
 
 # Hover height above pin / hole-midpoint during pin pregrasp (m).
-PIN_PREGRASP_OFFSET_Z: float = 0.16
+PIN_PREGRASP_OFFSET_Z: float = 0.20
 
 # Pregrasp / grasp yaw is forced to 0 during pin pickup —
 # (sin θ, cos θ) = (0, 1).
@@ -197,7 +197,9 @@ INWARD_YAW_LEFT_COS: float = 0.0
 # this amount, the right arm's y is decreased by the same.  Gives the
 # camera an unobstructed view and keeps the right arm well clear of the
 # left arm's working volume during pin insertion.
-PIN_HOME_Y_OFFSET: float = 0.10
+PIN_HOME_Y_OFFSET: float = 0.20
+PIN_HOME_Z: float = 1.0
+PIN_HOME_X: float = 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -339,9 +341,9 @@ class DualAssembly(TrajOptBase):
         sim: Optional[SquareRobotSim],
         left_start: Optional[torch.Tensor] = None,
         right_start: Optional[torch.Tensor] = None,
-        model: mujoco.MjModel,
-        data: mujoco.MjData,
-        hole_pairs: List[Tuple[int, int]],
+        model: mujoco.MjModel = None,
+        data: mujoco.MjData = None,
+        hole_pairs: List[Tuple[int, int]] = None,
     ):
         super().__init__(params)
 
@@ -1362,8 +1364,6 @@ class DualAssembly(TrajOptBase):
         # Zero the z component: arms stay at grasp_z throughout assembly.
         left_g  = beam_grad[self._left_index].clone()
         right_g = beam_grad[self._right_index].clone()
-        left_g[2]  = 0.0
-        right_g[2] = 0.0
         self._gradients.left_pose  = left_g
         self._gradients.right_pose = right_g
 

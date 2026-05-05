@@ -122,8 +122,8 @@ class PinRotateConfig:
     # Left arm sits on +y so inward yaw is around -π/4 (cf. -π/2 would
     # be a full quarter turn — these defaults are -π/4, sin/cos of
     # ±0.707107).
-    inward_yaw_left_sin: float = -0.707107
-    inward_yaw_left_cos: float =  0.707107
+    inward_yaw_left_sin: float = -1.0
+    inward_yaw_left_cos: float =  0.0
 
 
 @dataclass(frozen=True)
@@ -133,12 +133,12 @@ class PinInsertionConfig:
     Linear pipeline: success or timeout, both go to RELEASE_PIN.
     There is no slip / recovery branch in pin insertion."""
     # Pre-insertion hover gate (max |Δx|, |Δy|, |Δz|).
-    pregrasp_tol: float = 0.01
+    pregrasp_tol: float = 0.004
     # Hover height for MOVE_TO_HOLE_PREGRASP, expressed as a delta
     # ABOVE the active hole-pair midpoint z (not absolute).  The pin
     # then descends from (mid_xy, mid_z + pregrasp_z_delta) to mid_z
     # during INSERT_PIN.
-    pregrasp_z_delta: float = 0.10
+    pregrasp_z_delta: float = 0.075
     # Insertion success criterion — z is primary (confirms the pin
     # has descended into the hole); xy is a sanity check.
     z_tol:  float = 0.01
@@ -148,14 +148,14 @@ class PinInsertionConfig:
     convergence_hysteresis: int = 1
     # Step budget before INSERT_PIN gives up and releases anyway —
     # prevents a misaligned insertion deadlocking the FSM.
-    timeout_steps: int = 35
+    timeout_steps: int = 10
     # Step budget for MOVE_TO_HOLE_PREGRASP before the FSM bails out
     # and lifts to RECOVER_INSERTION_PREGRASP for a retry.
     pregrasp_timeout_steps: int = 35
     # Vertical lift (m) applied during RECOVER_INSERTION_PREGRASP —
     # the EE moves up this far above wherever it was when the
     # MOVE_TO_HOLE_PREGRASP timeout fired, then retries.
-    recovery_z_delta: float = 0.10
+    recovery_z_delta: float = 0.06
 
 
 @dataclass(frozen=True)

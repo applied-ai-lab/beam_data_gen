@@ -1183,6 +1183,7 @@ class DualAssembly(TrajOptBase):
             State.INSERT_PIN,
             State.RETREAT_PIN,
             State.PIN_RECOVERY_MOVE_UP,
+            State.RECOVER_INSERTION_PREGRASP,
         ):
             self._grad_pin_phase()
         # PICK_TASK / CLOSE_GRIPPER / READY / RELEASE_GRIPPER /
@@ -1456,7 +1457,7 @@ class DualAssembly(TrajOptBase):
             cur = self._states.left_pose.detach()
             target_z = (self._insertion_recovery_target_z
                         if self._insertion_recovery_target_z is not None
-                        else float(cur[2]))
+                        else float(cur[2])+CONFIG.pin.insertion.recovery_z_delta)
             return _t(cur[0], cur[1], target_z,
                       CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
@@ -1581,7 +1582,7 @@ class DualAssembly(TrajOptBase):
             [mid[0], mid[1], float(mid[2]) + CONFIG.pin.insertion.pregrasp_z_delta],
             dtype=torch.float32, device=self.params.device,
         )
-        return float((self._states.left_pose[:3] - target).abs().max()) < CONFIG.pin.insertion.pregrasp_tol
+        return float((self._states.left_pose[:2] - target[:2]).abs().max()) < CONFIG.pin.insertion.pregrasp_tol
 
     def _check_pin_insert_progress(self) -> bool:
         """Advance / reset the insert hysteresis counter and return True

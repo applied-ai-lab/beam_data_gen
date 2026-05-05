@@ -309,12 +309,23 @@ class DualAssembly(TrajOptBase):
 
     @property
     def _left_pin_home(self) -> torch.Tensor:
+        if self.left_start is None:
+            raise RuntimeError(
+                "DualAssembly.left_start is None — caller must set it (via "
+                "FK on HOME_Q_LEFT) before any state that reads pin homes "
+                "(STOW_BOTH and the rest of pin phase)."
+            )
         h = self.left_start.detach().clone()
         h[1] = h[1] + PIN_HOME_Y_OFFSET
         return h
 
     @property
     def _right_pin_home(self) -> torch.Tensor:
+        if self.right_start is None:
+            raise RuntimeError(
+                "DualAssembly.right_start is None — caller must set it (via "
+                "FK on HOME_Q_RIGHT) before any state that reads pin homes."
+            )
         return self.right_start.detach().clone()
 
     # ------------------------------------------------------------------
@@ -326,8 +337,8 @@ class DualAssembly(TrajOptBase):
         params: TrajOptParams,
         state_params: StateParams,
         sim: Optional[SquareRobotSim],
-        left_start: torch.Tensor,
-        right_start: torch.Tensor,
+        left_start: Optional[torch.Tensor] = None,
+        right_start: Optional[torch.Tensor] = None,
         model: mujoco.MjModel,
         data: mujoco.MjData,
         hole_pairs: List[Tuple[int, int]],
@@ -358,6 +369,9 @@ class DualAssembly(TrajOptBase):
             list(self.sim._geom_to_name.values()) if sim is not None else []
         )
 
+        # No silent default: callers must explicitly set these (typically
+        # to FK(HOME_Q_*)) before STOW_BOTH / pin phase, or the pin-home
+        # properties below will raise.
         self.left_start = left_start
         self.right_start = right_start
 
@@ -1101,10 +1115,26 @@ class DualAssembly(TrajOptBase):
         self._goto(State.MOVE_TO_PREGRASP)
 
     def _select_pair(self) -> Optional[int]:
-        """Smallest-distance unconverged pair. ``hole_positions`` is
-        guaranteed non-None by ``optimise()``'s precondition check."""
+        """Pick the next pair to assemble.
+
+        Pair ``PRIORITY_PAIR_IDX`` (default 1) is attempted first
+        whenever it still has at least one unconverged beam.  All
+        other pairs fall back to the original smallest-current-distance
+        rule.
+
+        ``hole_positions`` is guaranteed non-None by ``optimise()``'s
+        precondition check.
+        """
+        PRIORITY_PAIR_IDX = 1
+        if 0 <= PRIORITY_PAIR_IDX < len(self._hole_pairs):
+            a, b = self._hole_pairs[PRIORITY_PAIR_IDX]
+            if not (a in self._convergence and b in self._convergence):
+                return PRIORITY_PAIR_IDX
+
         best_idx, best_score = None, float("inf")
         for pair_idx, (a, b) in enumerate(self._hole_pairs):
+            if pair_idx == PRIORITY_PAIR_IDX:
+                continue
             if a in self._convergence and b in self._convergence:
                 continue
             score = float(np.linalg.norm(self._hole_positions[a] - self._hole_positions[b]))

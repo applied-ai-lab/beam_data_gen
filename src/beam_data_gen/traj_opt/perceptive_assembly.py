@@ -159,8 +159,8 @@ ASSEMBLE_SNAP_RADIUS:       float = 0.03
 # Pin-phase snap radii — kept distinct from the beam-phase constants so
 # pin pre-insertion / insertion can be tuned independently of beam descent
 # / dual-assemble.
-PIN_PREGRASP_SNAP_RADIUS:   float = 0.04   # MOVE_TO_HOLE_PREGRASP snap
-PIN_INSERTION_SNAP_RADIUS:  float = 0.05   # INSERT_PIN snap
+PIN_PREGRASP_SNAP_RADIUS:   float = 0.05   # MOVE_TO_HOLE_PREGRASP snap
+PIN_INSERTION_SNAP_RADIUS:  float = 0.10   # INSERT_PIN snap
 
 
 # ---------------------------------------------------------------------------
@@ -170,8 +170,8 @@ PIN_INSERTION_SNAP_RADIUS:  float = 0.05   # INSERT_PIN snap
 # Per-pair Euclidean (xy) tolerance for pin insertion convergence — the
 # "8 mm regrasp loop": below this, RELEASE_PIN may fire; above it, the
 # planner forces a recovery + regrasp instead of releasing.
-PIN_INSERT_TOL: float = 0.01
-PIN_INSERT_PREGRASP_TOL: float = 0.01
+PIN_INSERT_TOL: float = 0.00
+PIN_INSERT_PREGRASP_TOL: float = 0.005
 
 # Cycles the pin must remain inside PIN_INSERT_TOL before RELEASE_PIN fires.
 PIN_CONVERGENCE_HYSTERESIS: int = 1
@@ -180,7 +180,7 @@ PIN_CONVERGENCE_HYSTERESIS: int = 1
 PIN_YAW_TOL: float = 0.2
 
 # Hover height above pin / hole-midpoint during pin pregrasp (m).
-PIN_PREGRASP_OFFSET_Z: float = 0.20
+PIN_PREGRASP_OFFSET_Z: float = 0.10
 PIN_GRASP_OFFSET_Z: float = 0.01
 
 # Pregrasp / grasp yaw is forced to 0 during pin pickup —
@@ -190,8 +190,8 @@ PIN_GRASP_COS: float = 1.0
 
 # "Inward" for the left arm: gripper points toward y = 0.  Left arm sits
 # on +y, so inward yaw = -π/2 → (sin θ, cos θ) = (-1, 0).
-INWARD_YAW_LEFT_SIN: float = -1.0
-INWARD_YAW_LEFT_COS: float = 0.0
+INWARD_YAW_LEFT_SIN: float = -0.707107
+INWARD_YAW_LEFT_COS: float = 0.707107
 
 # Pin-phase home offset (m).  Both arms park at the beam-phase home
 # shifted this far further from the workspace centreline (y = 0) before

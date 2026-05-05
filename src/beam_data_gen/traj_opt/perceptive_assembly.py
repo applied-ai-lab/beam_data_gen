@@ -1452,6 +1452,17 @@ class DualAssembly(TrajOptBase):
         before the next state runs.  If no candidate exists, transitions
         to ``ALL_DONE``.
         """
+        # Latch all beams as converged for the duration of pin phase.
+        # Why: the PTU slews to PIN_VIEW for pin perception, which
+        # changes the camera extrinsics enough that the beam AprilTag
+        # poses drift out of the hole-distance threshold even when the
+        # physical assembly has not moved.  Re-evaluating beam
+        # convergence against this drifted perception would spuriously
+        # un-latch pairs and block PICK_PIN.
+        for a, b in self._hole_pairs:
+            self._convergence[a] = True
+            self._convergence[b] = True
+
         best, best_score = None, float("inf")
         for pair_idx, (a, b) in enumerate(self._hole_pairs):
             if pair_idx in self._pinned_pairs:

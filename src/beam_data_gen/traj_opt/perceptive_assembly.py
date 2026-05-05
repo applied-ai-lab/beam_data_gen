@@ -301,6 +301,23 @@ class DualAssembly(TrajOptBase):
     """
 
     # ------------------------------------------------------------------
+    # Pin-phase home targets — computed live from self.left_start /
+    # self.right_start so they pick up the FK home pose the caller patches
+    # in after construction.  Only the left arm is offset (+y by
+    # PIN_HOME_Y_OFFSET); right arm parks at right_start unchanged.
+    # ------------------------------------------------------------------
+
+    @property
+    def _left_pin_home(self) -> torch.Tensor:
+        h = self.left_start.detach().clone()
+        h[1] = h[1] + PIN_HOME_Y_OFFSET
+        return h
+
+    @property
+    def _right_pin_home(self) -> torch.Tensor:
+        return self.right_start.detach().clone()
+
+    # ------------------------------------------------------------------
     # Construction / lifecycle
     # ------------------------------------------------------------------
 
@@ -349,10 +366,12 @@ class DualAssembly(TrajOptBase):
         # Convention: left arm sits at +y, right at -y, so the offset is
         # added on the left and subtracted on the right.  Both arms drive
         # to this pose during STOW_BOTH before the PTU is moved.
-        self._left_pin_home  = left_start.detach().clone()
-        self._right_pin_home = right_start.detach().clone()
-        self._left_pin_home[1]  = self._left_pin_home[1]  + PIN_HOME_Y_OFFSET
-        self._right_pin_home[1] = self._right_pin_home[1] - PIN_HOME_Y_OFFSET
+        # Pin homes are computed live from self.left_start / self.right_start
+        # via @property below.  Capturing them here would freeze whatever
+        # placeholder the caller passed in (atls.py constructs DualAssembly
+        # with _zero starts and patches left_start/right_start afterwards).
+        # Only the left arm is offset (+y by PIN_HOME_Y_OFFSET); the right
+        # arm parks at right_start unchanged.
 
         # ---- Public read-only fields the callers depend on. ----
         self._left_index: Optional[int] = None

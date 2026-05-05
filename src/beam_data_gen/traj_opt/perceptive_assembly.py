@@ -887,12 +887,29 @@ class DualAssembly(TrajOptBase):
                 self._evaluate_idle_transitions()  # opens grippers, → MOVE_UP
 
         elif self._state == State.DUAL_ASSEMBLE:
-            # Convergence — only checked here and in PICK_TASK.
-            if (not skip_distance) and self._active_pair_converged():
-                self._latch_active_pair_converged()
-                self._goto(State.RELEASE_GRIPPER)
-                self._evaluate_idle_transitions()  # opens grippers, → MOVE_AWAY
-                return
+            # Convergence — only checked here and in PICK_TASK.  Uses
+            # the same per-beam ``_convergence_counter`` hysteresis as
+            # PICK_TASK so a brief, transient touch (beams nudged
+            # apart on the next cycle) does NOT trigger a latch +
+            # MOVE_AWAY.  The counter is incremented pre-step against
+            # the seeded actual robot state; the latch + transition
+            # only fires once both active beams have held the
+            # threshold for ``CONVERGENCE_HYSTERESIS`` consecutive
+            # cycles.
+            if (not skip_distance) and self._active_pair_idx is not None:
+                a, b = self._hole_pairs[self._active_pair_idx]
+                if self._active_pair_converged():
+                    self._convergence_counter[a] = self._convergence_counter.get(a, 0) + 1
+                    self._convergence_counter[b] = self._convergence_counter.get(b, 0) + 1
+                else:
+                    self._convergence_counter[a] = 0
+                    self._convergence_counter[b] = 0
+                if (self._convergence_counter.get(a, 0) >= CONVERGENCE_HYSTERESIS
+                        and self._convergence_counter.get(b, 0) >= CONVERGENCE_HYSTERESIS):
+                    self._latch_active_pair_converged()
+                    self._goto(State.RELEASE_GRIPPER)
+                    self._evaluate_idle_transitions()  # opens grippers, → MOVE_AWAY
+                    return
             if not check_distance_only:
                 # Slip detector — drives recovery without releasing convergence.
                 if self._ee_slipped_from_beams():
@@ -1003,14 +1020,22 @@ class DualAssembly(TrajOptBase):
     # ------------------------------------------------------------------
 
     def _enter_pick_task(self) -> None:
-        """Latch hole-converged beams, then pick the next pair (or DONE).
+        """Re-evaluate convergence from current observations, then pick
+        the next pair (or transition to pin phase).
 
         Convergence is **only** evaluated in this method (and in
         ``DUAL_ASSEMBLE`` for the active pair). All other states leave
         ``_convergence`` / ``_convergence_counter`` untouched.
+
+        Mistake correction: a beam that was previously latched but is
+        no longer within threshold (e.g. the pair was knocked apart
+        during MOVE_AWAY) is unlatched here so its pair is re-selected
+        and re-attempted.  The latches become effectively immutable
+        once we transition to STOW_BOTH (``_pin_phase_active = True``)
+        because PICK_TASK is unreachable from pin phase — so this
+        re-evaluation only ever runs while there is still beam work
+        outstanding.
         """
-        # Hysteresis-based latching of any pair whose holes are within
-        # threshold for several consecutive PICK_TASK visits.
         for k in range(self._state_params.no_beams):
             if self._beam_converged_by_holes(k):
                 self._convergence_counter[k] = self._convergence_counter.get(k, 0) + 1
@@ -1018,6 +1043,11 @@ class DualAssembly(TrajOptBase):
                     self._convergence[k] = True
             else:
                 self._convergence_counter[k] = 0
+                # Unlatch — current observation says this beam is not
+                # actually converged.  Without this, a brief touch
+                # during DUAL_ASSEMBLE could permanently mark a pair
+                # done even after it gets knocked apart.
+                self._convergence.pop(k, None)
 
         pair_idx = self._select_pair()
         if pair_idx is None:

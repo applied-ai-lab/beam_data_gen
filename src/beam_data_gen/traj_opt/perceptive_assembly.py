@@ -51,7 +51,7 @@ User-directed deviations from PERCEPTIVE_ASSEMBLY.MD
    beams (1, 3); left arm always handles even-indexed beams (0, 2).
    Computed once on entry to ``PICK_TASK``; never reshuffled mid-attempt.
 2. **Pregrasp gate uses full 5-DOF distance** (x, y, z, sinθ, cosθ), gated by
-   ``PREGRASP_TOL`` as a single MSE-sum bound.
+   ``CONFIG.grasp.pregrasp_tol`` as a single MSE-sum bound.
 3. **Convergence is touched only in PICK_TASK and DUAL_ASSEMBLE.** No
    per-cycle latching during grasp / move states.
 4. **No gripper hysteresis.** Grippers are toggled exclusively in
@@ -62,8 +62,8 @@ User-directed deviations from PERCEPTIVE_ASSEMBLY.MD
    ``RECOVERY_RELEASE → RECOVERY_MOVE_UP → MOVE_TO_PREGRASP`` (same active
    pair).
 6. **DUAL_ASSEMBLE slip detector.** If either EE separates from its assigned
-   beam pose by > ``ASSEMBLE_SLIP_DIST`` (default 3 cm) for
-   ``ASSEMBLE_SLIP_STEPS`` consecutive steps (default 20), the planner
+   beam pose by > ``CONFIG.beam_assemble.slip_dist`` (default 3 cm) for
+   ``CONFIG.beam_assemble.slip_steps`` consecutive steps (default 20), the planner
    assumes the grasp slipped and routes through recovery.
 7. **``hole_pairs`` is mandatory.** ``__init__`` raises ``ValueError`` if it
    is empty / ``None``. ``optimise()`` raises ``RuntimeError`` if
@@ -107,105 +107,65 @@ from beam_data_gen.simulator.square_robot_sim import SquareRobotSim
 
 
 # ---------------------------------------------------------------------------
-# Tunables — all units SI (metres, radians). Defaults come from the original
-# dual_assembly.py where applicable; new gates have rationale in-line.
+# Tunables — all values live in ``perceptive_config.CONFIG``, grouped
+# hierarchically by FSM phase / responsibility.  The module-level names
+# below are kept as backwards-compat aliases for external callers
+# (tests, smoke tests, trace scripts) that import individual constants.
+# Internal code reads ``CONFIG.<group>.<name>`` directly.
 # ---------------------------------------------------------------------------
 
-# Pregrasp gate: per-axis max absolute error on (x, y, z). Rotation ignored.
-# Each of |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-PREGRASP_TOL: float = 0.03
+from beam_data_gen.traj_opt.perceptive_config import CONFIG
 
-# Grasp contact gate: per-axis max absolute error on (x, y, z). Each of
-# |dx|, |dy|, |dz| must be below this bound for the gate to fire.
-GRASP_POS_TOL: float = 0.013
+# Beam-phase grasp gates.
+PREGRASP_TOL  = CONFIG.grasp.pregrasp_tol
+GRASP_POS_TOL = CONFIG.grasp.grasp_pos_tol
 
-# Per-pair assembly convergence (Euclidean hole distance).
-HOLE_CONVERGENCE_THRESHOLD: float = 0.005
+# DUAL_ASSEMBLE convergence + slip + timeout.
+HOLE_CONVERGENCE_THRESHOLD = CONFIG.beam_assemble.hole_convergence_threshold
+CONVERGENCE_HYSTERESIS     = CONFIG.beam_assemble.convergence_hysteresis
+ASSEMBLE_SLIP_DIST         = CONFIG.beam_assemble.slip_dist
+ASSEMBLE_SLIP_STEPS        = CONFIG.beam_assemble.slip_steps
+ASSEMBLE_TIMEOUT_STEPS     = CONFIG.beam_assemble.timeout_steps
 
-# Cycles a pair must stay below the hole threshold before being latched.
-CONVERGENCE_HYSTERESIS: int = 1
+# Per-state step budgets.
+DESCEND_TIMEOUT_STEPS = CONFIG.descending.timeout_steps
+GO_HOME_TIMEOUT_STEPS = CONFIG.go_home.timeout_steps
 
-# DUAL_ASSEMBLE slippage detector. Distance is measured per arm between the
-# end-effector position and its assigned beam position; if exceeded for the
-# given number of consecutive steps the grasp is considered failed.
-ASSEMBLE_SLIP_DIST: float = 0.15      # 5 cm
-ASSEMBLE_SLIP_STEPS: int  = 1000
+# MOVE_AWAY / RECOVERY_MOVE_UP / LIFT_PIN / RETREAT_PIN gate.
+MOVE_UP_TOL = CONFIG.move_up.tol
+MOVE_UP_Z   = CONFIG.move_up.z
 
-# Per-state step budgets. The planner runs at ~30 Hz so 150 ≈ 5 s.
-DESCEND_TIMEOUT_STEPS:  int = 35
-ASSEMBLE_TIMEOUT_STEPS: int = 75
-GO_HOME_TIMEOUT_STEPS:  int = 100
+# Gradient mixing + integrator step.
+HOLE_GRADIENT_WEIGHT = CONFIG.gradient.hole_weight
+YAW_GRADIENT_WEIGHT  = CONFIG.gradient.yaw_weight
+LEARNING_RATE        = CONFIG.gradient.learning_rate
 
-# Position-only gate for MOVE_AWAY / RECOVERY_MOVE_UP (orientation ignored).
-MOVE_UP_TOL: float = 0.04
-MOVE_UP_Z: float = 1.0
+# Snap radii.
+DESCENT_SNAP_RADIUS       = CONFIG.snap.descent_radius
+ASSEMBLE_SNAP_RADIUS      = CONFIG.snap.assemble_radius
+PIN_PREGRASP_SNAP_RADIUS  = CONFIG.snap.pin_pregrasp_radius
+PIN_INSERTION_SNAP_RADIUS = CONFIG.snap.pin_insertion_radius
 
+# Pin-phase pickup.
+PIN_PREGRASP_OFFSET_Z = CONFIG.pin.pickup.pregrasp_offset_z
+PIN_GRASP_OFFSET_Z    = CONFIG.pin.pickup.grasp_offset_z
+PIN_GRASP_SIN         = CONFIG.pin.pickup.grasp_yaw_sin
+PIN_GRASP_COS         = CONFIG.pin.pickup.grasp_yaw_cos
 
-# Gradient mixing — kept identical to dual_assembly.py for behavioural parity
-# in the assembly phase.
-HOLE_GRADIENT_WEIGHT: float = 0.0
-YAW_GRADIENT_WEIGHT:  float = 1.2
+# Pin-phase rotate.
+PIN_YAW_TOL          = CONFIG.pin.rotate.yaw_tol
+INWARD_YAW_LEFT_SIN  = CONFIG.pin.rotate.inward_yaw_left_sin
+INWARD_YAW_LEFT_COS  = CONFIG.pin.rotate.inward_yaw_left_cos
 
-# Gradient-descent learning rate. Hard-coded here (instead of read from
-# TrajOptParams.step_size) so the planner's integrator step is fixed by the
-# module rather than by callers.
-LEARNING_RATE: float = 0.25
+# Pin-phase insertion.
+PIN_INSERT_PREGRASP_TOL    = CONFIG.pin.insertion.pregrasp_tol
+PIN_INSERT_Z_TOL           = CONFIG.pin.insertion.z_tol
+PIN_INSERT_TOL             = CONFIG.pin.insertion.xy_tol
+PIN_CONVERGENCE_HYSTERESIS = CONFIG.pin.insertion.convergence_hysteresis
+PIN_INSERT_TIMEOUT         = CONFIG.pin.insertion.timeout_steps
 
-# Snap radii (metres). Inside the radius the per-state gradient is replaced
-# by one whose integrator step lands exactly on the target, bypassing the
-# asymptotic shrinkage of a quadratic loss. Set to 0.0 to disable.
-DESCENT_SNAP_RADIUS:        float = 0.04
-ASSEMBLE_SNAP_RADIUS:       float = 0.03
-# Pin-phase snap radii — kept distinct from the beam-phase constants so
-# pin pre-insertion / insertion can be tuned independently of beam descent
-# / dual-assemble.
-PIN_PREGRASP_SNAP_RADIUS:   float = 0.05   # MOVE_TO_HOLE_PREGRASP snap
-PIN_INSERTION_SNAP_RADIUS:  float = 0.10   # INSERT_PIN snap
-
-
-# ---------------------------------------------------------------------------
-# Pin-phase tunables (see PERCEPTIVE_ASSEMBLY.MD §10).
-# ---------------------------------------------------------------------------
-
-# Pin-insertion success criterion.  Insertion succeeds when the pin EE
-# is at the hole-pair midpoint in *both* z (primary — confirms the pin
-# has descended into the hole) and xy (sanity check that we're over the
-# right hole).  No retry / recovery: on the next planning cycle after
-# success the FSM advances to RELEASE_PIN unconditionally.
-PIN_INSERT_Z_TOL: float = 0.01     # 1 cm — z alignment with hole surface
-PIN_INSERT_TOL:   float = 0.01     # 1 cm — xy alignment with hole midpoint
-PIN_INSERT_PREGRASP_TOL: float = 0.005
-
-# Cycles the pin must remain inside the success criterion before
-# RELEASE_PIN fires.
-PIN_CONVERGENCE_HYSTERESIS: int = 1
-
-# Yaw gate for ROTATE_PIN_INWARD (rad).
-PIN_YAW_TOL: float = 0.2
-
-# Hover height above pin / hole-midpoint during pin pregrasp (m).
-PIN_PREGRASP_OFFSET_Z: float = 0.10
-PIN_GRASP_OFFSET_Z: float = 0.01
-
-# Pregrasp / grasp yaw is forced to 0 during pin pickup —
-# (sin θ, cos θ) = (0, 1).
-PIN_GRASP_SIN: float = 0.0
-PIN_GRASP_COS: float = 1.0
-
-# "Inward" for the left arm: gripper points toward y = 0.  Left arm sits
-# on +y, so inward yaw = -π/2 → (sin θ, cos θ) = (-1, 0).
-INWARD_YAW_LEFT_SIN: float = -0.707107
-INWARD_YAW_LEFT_COS: float = 0.707107
-
-# Pin-phase home offset (m).  Both arms park at the beam-phase home
-# shifted this far further from the workspace centreline (y = 0) before
-# the PTU is commanded to PIN_VIEW: the left arm's y is increased by
-# this amount, the right arm's y is decreased by the same.  Gives the
-# camera an unobstructed view and keeps the right arm well clear of the
-# left arm's working volume during pin insertion.
-PIN_HOME_Y_OFFSET: float = 0.20
-PIN_HOME_Z: float = 1.0
-PIN_HOME_X: float = 0.4
+# Pin-phase home.
+PIN_HOME_Y_OFFSET = CONFIG.pin.home.y_offset
 
 
 # ---------------------------------------------------------------------------
@@ -236,12 +196,12 @@ class State(IntEnum):
     MOVE_TO_PIN_PREGRASP   = 14  # left hovers above pin, yaw = 0
     DESCEND_TO_PIN         = 15  # left descends to pin, yaw = 0
     CLOSE_PIN_GRIPPER      = 16  # latch left gripper closed (1 step)
-    LIFT_PIN               = 17  # lift pin to MOVE_UP_Z, yaw = 0
+    LIFT_PIN               = 17  # lift pin to CONFIG.move_up.z, yaw = 0
     ROTATE_PIN_INWARD      = 18  # rotate left wrist 90° inward (toward y = 0)
     MOVE_TO_HOLE_PREGRASP  = 19  # left moves over hole-pair midpoint, inward yaw
     INSERT_PIN             = 20  # descend pin into midpoint; 8 mm convergence gate
     RELEASE_PIN            = 21  # latch left gripper open (1 step) on success
-    RETREAT_PIN            = 22  # lift to MOVE_UP_Z then PICK_PIN
+    RETREAT_PIN            = 22  # lift to CONFIG.move_up.z then PICK_PIN
     PIN_RECOVERY_RELEASE   = 23  # open gripper on grasp/insert failure (1 step)
     PIN_RECOVERY_MOVE_UP   = 24  # lift, retry MOVE_TO_PIN_PREGRASP for same pin
     ALL_DONE               = 25  # terminal: all pins placed
@@ -354,7 +314,7 @@ class DualAssembly(TrajOptBase):
                 "(STOW_BOTH and the rest of pin phase)."
             )
         h = self.left_start.detach().clone()
-        h[1] = h[1] + PIN_HOME_Y_OFFSET
+        h[1] = h[1] + CONFIG.pin.home.y_offset
         return h
 
     @property
@@ -671,12 +631,12 @@ class DualAssembly(TrajOptBase):
                 self._states.detach()
             else:
                 # Apply gradient with per-arm velocity limiting.
-                delta_l = self._limit_ee_delta(LEARNING_RATE * gradients.left_pose)
-                delta_r = self._limit_ee_delta(LEARNING_RATE * gradients.right_pose)
+                delta_l = self._limit_ee_delta(CONFIG.gradient.learning_rate * gradients.left_pose)
+                delta_r = self._limit_ee_delta(CONFIG.gradient.learning_rate * gradients.right_pose)
                 self._states.left_pose  = self._states.left_pose  - delta_l
                 self._states.right_pose = self._states.right_pose - delta_r
-                self._states.beam_poses = self._states.beam_poses - LEARNING_RATE * gradients.beam_poses
-                self._states.pregrasp   = self._states.pregrasp   - LEARNING_RATE * gradients.pregrasp
+                self._states.beam_poses = self._states.beam_poses - CONFIG.gradient.learning_rate * gradients.beam_poses
+                self._states.pregrasp   = self._states.pregrasp   - CONFIG.gradient.learning_rate * gradients.pregrasp
 
                 # Enforce workspace bounds (z, y) for each arm plus pregrasp z.
                 self._clamp_ee_poses()
@@ -752,14 +712,14 @@ class DualAssembly(TrajOptBase):
 
         # ── Header: state + budget ──────────────────────────────────────
         if self._state == State.DESCENDING:
-            budget = (f"  budget={DESCEND_TIMEOUT_STEPS - self._state_step}"
-                      f"/{DESCEND_TIMEOUT_STEPS} steps")
+            budget = (f"  budget={CONFIG.descending.timeout_steps - self._state_step}"
+                      f"/{CONFIG.descending.timeout_steps} steps")
         elif self._state == State.DUAL_ASSEMBLE:
-            budget = (f"  budget={ASSEMBLE_TIMEOUT_STEPS - self._state_step}"
-                      f"/{ASSEMBLE_TIMEOUT_STEPS}  slip={self._slip_counter}/{ASSEMBLE_SLIP_STEPS}")
+            budget = (f"  budget={CONFIG.beam_assemble.timeout_steps - self._state_step}"
+                      f"/{CONFIG.beam_assemble.timeout_steps}  slip={self._slip_counter}/{CONFIG.beam_assemble.slip_steps}")
         elif self._state == State.GO_HOME:
-            budget = (f"  budget={GO_HOME_TIMEOUT_STEPS - self._state_step}"
-                      f"/{GO_HOME_TIMEOUT_STEPS} steps")
+            budget = (f"  budget={CONFIG.go_home.timeout_steps - self._state_step}"
+                      f"/{CONFIG.go_home.timeout_steps} steps")
         else:
             budget = ""
 
@@ -779,10 +739,10 @@ class DualAssembly(TrajOptBase):
             parts = []
             for a, b in self._hole_pairs:
                 d = float(np.linalg.norm(self._hole_positions[a] - self._hole_positions[b]))
-                flag = " ✓" if d < HOLE_CONVERGENCE_THRESHOLD else ""
+                flag = " ✓" if d < CONFIG.beam_assemble.hole_convergence_threshold else ""
                 parts.append(f"({a},{b})={d*1e3:.1f}mm{flag}")
             _log(f"  hole_dists: {', '.join(parts)}"
-                 f"  [thresh={HOLE_CONVERGENCE_THRESHOLD*1e3:.0f}mm]")
+                 f"  [thresh={CONFIG.beam_assemble.hole_convergence_threshold*1e3:.0f}mm]")
 
         # ── Per-beam: position, goal error, planner losses ──────────────
         hl = self._hand_losses
@@ -823,9 +783,9 @@ class DualAssembly(TrajOptBase):
             l_grasp_axis = self._descent_max_axis_err_l
             r_grasp_axis = self._descent_max_axis_err_r
             _log(f"  pregrasp_xyz_max_err: L={l_preg_axis*1e3:.1f}mm  R={r_preg_axis*1e3:.1f}mm"
-                 f"  [gate<{PREGRASP_TOL*1e3:.0f}mm]")
+                 f"  [gate<{CONFIG.grasp.pregrasp_tol*1e3:.0f}mm]")
             _log(f"  grasp_xyz_max_err:    L={l_grasp_axis*1e3:.1f}mm  R={r_grasp_axis*1e3:.1f}mm"
-                 f"  [gate<{GRASP_POS_TOL*1e3:.0f}mm]")
+                 f"  [gate<{CONFIG.grasp.grasp_pos_tol*1e3:.0f}mm]")
 
     # ------------------------------------------------------------------
     # Transition evaluation — split into idle (pre-rollout) and step
@@ -925,7 +885,7 @@ class DualAssembly(TrajOptBase):
             if (not skip_distance) and self._home_reached():
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
-            elif (not check_distance_only) and self._state_step >= GO_HOME_TIMEOUT_STEPS:
+            elif (not check_distance_only) and self._state_step >= CONFIG.go_home.timeout_steps:
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
 
@@ -940,7 +900,7 @@ class DualAssembly(TrajOptBase):
                 # rollout step starts in READY (and then DUAL_ASSEMBLE).
                 self._evaluate_idle_transitions()
                 self._evaluate_idle_transitions()
-            elif (not check_distance_only) and self._state_step >= DESCEND_TIMEOUT_STEPS:
+            elif (not check_distance_only) and self._state_step >= CONFIG.descending.timeout_steps:
                 self._goto(State.RECOVERY_RELEASE)
                 self._evaluate_idle_transitions()  # opens grippers, → MOVE_UP
 
@@ -962,8 +922,8 @@ class DualAssembly(TrajOptBase):
                 else:
                     self._convergence_counter[a] = 0
                     self._convergence_counter[b] = 0
-                if (self._convergence_counter.get(a, 0) >= CONVERGENCE_HYSTERESIS
-                        and self._convergence_counter.get(b, 0) >= CONVERGENCE_HYSTERESIS):
+                if (self._convergence_counter.get(a, 0) >= CONFIG.beam_assemble.convergence_hysteresis
+                        and self._convergence_counter.get(b, 0) >= CONFIG.beam_assemble.convergence_hysteresis):
                     self._latch_active_pair_converged()
                     self._goto(State.RELEASE_GRIPPER)
                     self._evaluate_idle_transitions()  # opens grippers, → MOVE_AWAY
@@ -974,12 +934,12 @@ class DualAssembly(TrajOptBase):
                     self._slip_counter += 1
                 else:
                     self._slip_counter = 0
-                if self._slip_counter >= ASSEMBLE_SLIP_STEPS:
+                if self._slip_counter >= CONFIG.beam_assemble.slip_steps:
                     self._slip_counter = 0
                     self._goto(State.RECOVERY_RELEASE)
                     self._evaluate_idle_transitions()
                     return
-                if self._state_step >= ASSEMBLE_TIMEOUT_STEPS:
+                if self._state_step >= CONFIG.beam_assemble.timeout_steps:
                     self._goto(State.RECOVERY_RELEASE)
                     self._evaluate_idle_transitions()
 
@@ -1008,7 +968,7 @@ class DualAssembly(TrajOptBase):
             if (not skip_distance) and self._pin_grasp_contact():
                 self._goto(State.CLOSE_PIN_GRIPPER)
                 self._evaluate_idle_transitions()  # → LIFT_PIN
-            elif (not check_distance_only) and self._state_step >= DESCEND_TIMEOUT_STEPS:
+            elif (not check_distance_only) and self._state_step >= CONFIG.descending.timeout_steps:
                 self._goto(State.PIN_RECOVERY_RELEASE)
                 self._evaluate_idle_transitions()  # → PIN_RECOVERY_MOVE_UP
 
@@ -1025,14 +985,19 @@ class DualAssembly(TrajOptBase):
                 self._goto(State.INSERT_PIN)
 
         elif self._state == State.INSERT_PIN:
-            # Linear pipeline — no retry.  The only exit is success
-            # (z and xy both at the hole-pair midpoint).  Slip detection
-            # and timeout removed by design: try the insert, release,
-            # move on to the next pin regardless of how cleanly the
-            # mate seated.
+            # Linear pipeline — no retry.  Two exits, both → RELEASE_PIN:
+            #   1. success: z and xy both at the hole-pair midpoint;
+            #   2. step budget exhausted (PIN_INSERT_TIMEOUT) — gives
+            #      up and moves on so a bad insertion can't deadlock
+            #      the FSM.
             if (not skip_distance) and self._check_pin_insert_progress():
                 self._goto(State.RELEASE_PIN)
                 self._evaluate_idle_transitions()  # opens left, → RETREAT_PIN
+                return
+            if (not check_distance_only) and self._state_step >= CONFIG.pin.insertion.timeout_steps:
+                self._pin_insert_counter = 0
+                self._goto(State.RELEASE_PIN)
+                self._evaluate_idle_transitions()
                 return
 
         elif self._state == State.RETREAT_PIN:
@@ -1077,7 +1042,7 @@ class DualAssembly(TrajOptBase):
         for k in range(self._state_params.no_beams):
             if self._beam_converged_by_holes(k):
                 self._convergence_counter[k] = self._convergence_counter.get(k, 0) + 1
-                if self._convergence_counter[k] >= CONVERGENCE_HYSTERESIS:
+                if self._convergence_counter[k] >= CONFIG.beam_assemble.convergence_hysteresis:
                     self._convergence[k] = True
             else:
                 self._convergence_counter[k] = 0
@@ -1147,7 +1112,7 @@ class DualAssembly(TrajOptBase):
         for a, b in self._hole_pairs:
             if beam_idx in (a, b):
                 d = float(np.linalg.norm(self._hole_positions[a] - self._hole_positions[b]))
-                return d < HOLE_CONVERGENCE_THRESHOLD
+                return d < CONFIG.beam_assemble.hole_convergence_threshold
         return False
 
     def _active_pair_converged(self) -> bool:
@@ -1155,7 +1120,7 @@ class DualAssembly(TrajOptBase):
             return False
         a, b = self._hole_pairs[self._active_pair_idx]
         d = float(np.linalg.norm(self._hole_positions[a] - self._hole_positions[b]))
-        return d < HOLE_CONVERGENCE_THRESHOLD
+        return d < CONFIG.beam_assemble.hole_convergence_threshold
 
     def _latch_active_pair_converged(self) -> None:
         a, b = self._hole_pairs[self._active_pair_idx]
@@ -1218,7 +1183,7 @@ class DualAssembly(TrajOptBase):
 
     def _grad_lift(self) -> None:
         """Pull up each arm to a predefined height, this does not require knowing the beam positions"""
-        z_target = torch.tensor(MOVE_UP_Z, dtype=torch.float32, device=self.params.device)
+        z_target = torch.tensor(CONFIG.move_up.z, dtype=torch.float32, device=self.params.device)
         loss_l = (self._states.left_pose[2]-z_target)**2
         loss_r = (self._states.right_pose[2]-z_target)**2
         self._gradients.left_pose = grad(loss_l,self._states.left_pose, retain_graph=True)[0]
@@ -1287,15 +1252,15 @@ class DualAssembly(TrajOptBase):
         # bypass them here.
         self._descent_snap_fired_l = False
         self._descent_snap_fired_r = False
-        snap_r = DESCENT_SNAP_RADIUS
-        if snap_r > 0.0 and LEARNING_RATE > 0.0:
+        snap_r = CONFIG.snap.descent_radius
+        if snap_r > 0.0 and CONFIG.gradient.learning_rate > 0.0:
             with torch.no_grad():
                 if 0.0 < dist_l < snap_r:
-                    g_l = (self._states.left_pose  - left_target).detach()  / LEARNING_RATE
+                    g_l = (self._states.left_pose  - left_target).detach()  / CONFIG.gradient.learning_rate
                     self._descent_snap_fired_l = True
                     self._descent_snap_count_l += 1
                 if 0.0 < dist_r < snap_r:
-                    g_r = (self._states.right_pose - right_target).detach() / LEARNING_RATE
+                    g_r = (self._states.right_pose - right_target).detach() / CONFIG.gradient.learning_rate
                     self._descent_snap_fired_r = True
                     self._descent_snap_count_r += 1
 
@@ -1323,8 +1288,8 @@ class DualAssembly(TrajOptBase):
             self._states.beam_poses, self._hole_positions, self._hole_pairs, self.params.device
         )
         hole_grad = grad(hole_loss, self._states.beam_poses, retain_graph=True)[0]
-        beam_grad = beam_grad + HOLE_GRADIENT_WEIGHT * hole_grad
-        beam_grad[:, 3:5] *= YAW_GRADIENT_WEIGHT
+        beam_grad = beam_grad + CONFIG.gradient.hole_weight * hole_grad
+        beam_grad[:, 3:5] *= CONFIG.gradient.yaw_weight
 
         # Zero the gradient on already-converged beams so the planner is
         # free to ignore them.
@@ -1337,8 +1302,8 @@ class DualAssembly(TrajOptBase):
         # active pair's beams are eligible; converged beams are skipped (their
         # gradient is already zero and we don't want to disturb them).
         self._assemble_snap_fired = [False] * self._state_params.no_beams
-        snap_r = ASSEMBLE_SNAP_RADIUS
-        if snap_r > 0.0 and LEARNING_RATE > 0.0:
+        snap_r = CONFIG.snap.assemble_radius
+        if snap_r > 0.0 and CONFIG.gradient.learning_rate > 0.0:
             active = ()
             if self._active_pair_idx is not None:
                 active = self._hole_pairs[self._active_pair_idx]
@@ -1351,7 +1316,7 @@ class DualAssembly(TrajOptBase):
                     if 0.0 < dist_xy < snap_r:
                         snap_g = (
                             self._states.beam_poses[k] - self._states.beam_goal[k]
-                        ).detach() / LEARNING_RATE
+                        ).detach() / CONFIG.gradient.learning_rate
                         beam_grad[k] = snap_g
                         self._assemble_snap_fired[k] = True
                         self._assemble_snap_count += 1
@@ -1374,15 +1339,15 @@ class DualAssembly(TrajOptBase):
         """Pin-phase controller.
 
         Right arm always pursues ``_right_pin_home`` for the entire pin
-        phase (the beam-phase home shifted by ``PIN_HOME_Y_OFFSET`` away
+        phase (the beam-phase home shifted by ``CONFIG.pin.home.y_offset`` away
         from y = 0).  Left arm pursues a state-specific target built by
         ``_left_target_for_state``; in ``STOW_BOTH`` the left target is
         ``_left_pin_home`` so both arms park at the pin-phase home before
         the PTU is commanded to PIN_VIEW.
 
-        Snap branch uses ``DESCENT_SNAP_RADIUS`` for ``DESCEND_TO_PIN``,
-        ``PIN_PREGRASP_SNAP_RADIUS`` for ``MOVE_TO_HOLE_PREGRASP`` and
-        ``PIN_INSERTION_SNAP_RADIUS`` for ``INSERT_PIN`` so the pickup /
+        Snap branch uses ``CONFIG.snap.descent_radius`` for ``DESCEND_TO_PIN``,
+        ``CONFIG.snap.pin_pregrasp_radius`` for ``MOVE_TO_HOLE_PREGRASP`` and
+        ``CONFIG.snap.pin_insertion_radius`` for ``INSERT_PIN`` so the pickup /
         pre-insertion / insertion gradient lands exactly on the target
         inside the radius (same trick as ``_grad_descending``).
         """
@@ -1400,18 +1365,18 @@ class DualAssembly(TrajOptBase):
 
         snap_r = 0.0
         if self._state == State.DESCEND_TO_PIN:
-            snap_r = DESCENT_SNAP_RADIUS
+            snap_r = CONFIG.snap.descent_radius
         elif self._state == State.MOVE_TO_HOLE_PREGRASP:
-            snap_r = PIN_PREGRASP_SNAP_RADIUS
+            snap_r = CONFIG.snap.pin_pregrasp_radius
         elif self._state == State.INSERT_PIN:
-            snap_r = PIN_INSERTION_SNAP_RADIUS
+            snap_r = CONFIG.snap.pin_insertion_radius
 
-        if snap_r > 0.0 and LEARNING_RATE > 0.0:
+        if snap_r > 0.0 and CONFIG.gradient.learning_rate > 0.0:
             with torch.no_grad():
                 diff = self._states.left_pose - target
                 dist = float((diff[:3] ** 2).sum() ** 0.5)
                 if 0.0 < dist < snap_r:
-                    g_l = diff.detach() / LEARNING_RATE
+                    g_l = diff.detach() / CONFIG.gradient.learning_rate
 
         self._gradients.left_pose = g_l
 
@@ -1439,32 +1404,37 @@ class DualAssembly(TrajOptBase):
             if self._active_pin_idx is None or self._pin_positions is None:
                 return None
             pin = self._pin_positions[self._active_pin_idx]
-            z_offset = (PIN_PREGRASP_OFFSET_Z
-                        if s == State.MOVE_TO_PIN_PREGRASP else PIN_GRASP_OFFSET_Z)
+            z_offset = (CONFIG.pin.pickup.pregrasp_offset_z
+                        if s == State.MOVE_TO_PIN_PREGRASP else CONFIG.pin.pickup.grasp_offset_z)
             return _t(pin[0], pin[1], pin[2] + z_offset,
-                      PIN_GRASP_SIN, PIN_GRASP_COS)
+                      CONFIG.pin.pickup.grasp_yaw_sin, CONFIG.pin.pickup.grasp_yaw_cos)
 
         if s == State.LIFT_PIN:
             cur = self._states.left_pose.detach()
-            return _t(cur[0], cur[1], MOVE_UP_Z, PIN_GRASP_SIN, PIN_GRASP_COS)
+            return _t(cur[0], cur[1], CONFIG.move_up.z, CONFIG.pin.pickup.grasp_yaw_sin, CONFIG.pin.pickup.grasp_yaw_cos)
 
         if s == State.ROTATE_PIN_INWARD:
             cur = self._states.left_pose.detach()
-            return _t(cur[0], cur[1], MOVE_UP_Z,
-                      INWARD_YAW_LEFT_SIN, INWARD_YAW_LEFT_COS)
+            return _t(cur[0], cur[1], CONFIG.move_up.z,
+                      CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s in (State.MOVE_TO_HOLE_PREGRASP, State.INSERT_PIN, State.RETREAT_PIN):
             if self._active_hole_pair_idx is None or self._hole_positions is None:
                 return None
             a, b = self._hole_pairs[self._active_hole_pair_idx]
             mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
-            z = float(mid[2]) if s == State.INSERT_PIN else MOVE_UP_Z
+            if s == State.INSERT_PIN:
+                z = float(mid[2])
+            elif s == State.MOVE_TO_HOLE_PREGRASP:
+                z = float(mid[2]) + CONFIG.pin.insertion.pregrasp_z_delta
+            else:  # RETREAT_PIN — generic lift to the workspace MOVE_UP_Z.
+                z = CONFIG.move_up.z
             return _t(mid[0], mid[1], z,
-                      INWARD_YAW_LEFT_SIN, INWARD_YAW_LEFT_COS)
+                      CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s == State.PIN_RECOVERY_MOVE_UP:
             cur = self._states.left_pose.detach()
-            return _t(cur[0], cur[1], MOVE_UP_Z, cur[3], cur[4])
+            return _t(cur[0], cur[1], CONFIG.move_up.z, cur[3], cur[4])
 
         return None
 
@@ -1528,44 +1498,44 @@ class DualAssembly(TrajOptBase):
     # ---- Pin-phase gates ----
 
     def _at_pin_home(self) -> bool:
-        """Both arms within ``MOVE_UP_TOL`` (Euclidean, position only) of
+        """Both arms within ``CONFIG.move_up.tol`` (Euclidean, position only) of
         their pin-phase home pose."""
         dl = float(((self._states.left_pose[:3]  - self._left_pin_home[:3])  ** 2)
                    .sum().sqrt())
         dr = float(((self._states.right_pose[:3] - self._right_pin_home[:3]) ** 2)
                    .sum().sqrt())
-        return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
+        return dl < CONFIG.move_up.tol and dr < CONFIG.move_up.tol
 
     def _pin_pregrasp_reached(self) -> bool:
         if self._active_pin_idx is None or self._pin_positions is None:
             return False
         pin = self._pin_positions[self._active_pin_idx]
         target = torch.tensor(
-            [pin[0], pin[1], pin[2] + PIN_PREGRASP_OFFSET_Z],
+            [pin[0], pin[1], pin[2] + CONFIG.pin.pickup.pregrasp_offset_z],
             dtype=torch.float32, device=self.params.device,
         )
-        return float((self._states.left_pose[:3] - target).abs().max()) < PREGRASP_TOL
+        return float((self._states.left_pose[:3] - target).abs().max()) < CONFIG.grasp.pregrasp_tol
 
     def _pin_grasp_contact(self) -> bool:
         if self._active_pin_idx is None or self._pin_positions is None:
             return False
         pin = self._pin_positions[self._active_pin_idx]
         target = torch.tensor(
-            [pin[0], pin[1], pin[2]+PIN_GRASP_OFFSET_Z],
+            [pin[0], pin[1], pin[2]+CONFIG.pin.pickup.grasp_offset_z],
             dtype=torch.float32, device=self.params.device,
         )
-        return float((self._states.left_pose[:3] - target).abs().max()) < GRASP_POS_TOL
+        return float((self._states.left_pose[:3] - target).abs().max()) < CONFIG.grasp.grasp_pos_tol
 
     def _left_lift_reached(self) -> bool:
-        return abs(float(self._states.left_pose[2]) - MOVE_UP_Z) < MOVE_UP_TOL
+        return abs(float(self._states.left_pose[2]) - CONFIG.move_up.z) < CONFIG.move_up.tol
 
     def _pin_yaw_reached(self) -> bool:
         cur_sin = float(self._states.left_pose[3])
         cur_cos = float(self._states.left_pose[4])
         cur_yaw = float(np.arctan2(cur_sin, cur_cos))
-        target_yaw = float(np.arctan2(INWARD_YAW_LEFT_SIN, INWARD_YAW_LEFT_COS))
+        target_yaw = float(np.arctan2(CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos))
         err = (cur_yaw - target_yaw + np.pi) % (2 * np.pi) - np.pi
-        return abs(err) < PIN_YAW_TOL
+        return abs(err) < CONFIG.pin.rotate.yaw_tol
 
     def _hole_pregrasp_reached(self) -> bool:
         if self._active_hole_pair_idx is None or self._hole_positions is None:
@@ -1573,16 +1543,16 @@ class DualAssembly(TrajOptBase):
         a, b = self._hole_pairs[self._active_hole_pair_idx]
         mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
         target = torch.tensor(
-            [mid[0], mid[1], MOVE_UP_Z],
+            [mid[0], mid[1], float(mid[2]) + CONFIG.pin.insertion.pregrasp_z_delta],
             dtype=torch.float32, device=self.params.device,
         )
-        return float((self._states.left_pose[:3] - target).abs().max()) < PIN_INSERT_PREGRASP_TOL
+        return float((self._states.left_pose[:3] - target).abs().max()) < CONFIG.pin.insertion.pregrasp_tol
 
     def _check_pin_insert_progress(self) -> bool:
         """Advance / reset the insert hysteresis counter and return True
         when the pin EE has reached the hole-pair midpoint in z (primary
         — confirms the pin has descended into the hole) AND xy (sanity)
-        for ``PIN_CONVERGENCE_HYSTERESIS`` consecutive steps.
+        for ``CONFIG.pin.insertion.convergence_hysteresis`` consecutive steps.
 
         Sole exit gate from ``INSERT_PIN``: there is no slip / timeout
         recovery path.  Once this returns True the FSM advances to
@@ -1595,25 +1565,25 @@ class DualAssembly(TrajOptBase):
         ee = self._states.left_pose[:3].detach().cpu().numpy()
         z_err  = abs(float(ee[2]) - float(mid[2]))
         xy_err = float(np.linalg.norm(ee[:2] - mid[:2]))
-        if z_err < PIN_INSERT_Z_TOL and xy_err < PIN_INSERT_TOL:
+        if z_err < CONFIG.pin.insertion.z_tol and xy_err < CONFIG.pin.insertion.xy_tol:
             self._pin_insert_counter += 1
         else:
             self._pin_insert_counter = 0
-        return self._pin_insert_counter >= PIN_CONVERGENCE_HYSTERESIS
+        return self._pin_insert_counter >= CONFIG.pin.insertion.convergence_hysteresis
 
     # ------------------------------------------------------------------
     # Gates — small predicates on the latest losses.
     # ------------------------------------------------------------------
 
     def _lift_reached(self) -> bool:
-        dl = abs(float(self._states.left_pose[2]-MOVE_UP_Z))
-        dr = abs(float(self._states.right_pose[2]-MOVE_UP_Z))
-        return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
+        dl = abs(float(self._states.left_pose[2]-CONFIG.move_up.z))
+        dr = abs(float(self._states.right_pose[2]-CONFIG.move_up.z))
+        return dl < CONFIG.move_up.tol and dr < CONFIG.move_up.tol
 
     def _home_reached(self) -> bool:
         dl = float(((self._states.left_pose[:3]  - self.left_start[:3])  ** 2).sum().sqrt())
         dr = float(((self._states.right_pose[:3] - self.right_start[:3]) ** 2).sum().sqrt())
-        return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
+        return dl < CONFIG.move_up.tol and dr < CONFIG.move_up.tol
 
     def _pregrasp_reached_5dof(self) -> bool:
         """Per-axis (x, y, z) pregrasp gate; rotation ignored."""
@@ -1623,29 +1593,29 @@ class DualAssembly(TrajOptBase):
         pr = self._states.pregrasp[self._right_index, :3]
         l = float((self._states.left_pose[:3]  - pl).abs().max())
         r = float((self._states.right_pose[:3] - pr).abs().max())
-        return l < PREGRASP_TOL and r < PREGRASP_TOL
+        return l < CONFIG.grasp.pregrasp_tol and r < CONFIG.grasp.pregrasp_tol
 
     def _grasp_contact(self) -> bool:
-        """Both arms within GRASP_POS_TOL of their fixed-z descent target on
+        """Both arms within CONFIG.grasp.grasp_pos_tol of their fixed-z descent target on
         every axis (x, y, z) independently. Uses per-axis max errors cached by
         ``_grad_descending`` against the fixed-z target rather than the raw
         perceived beam z (so the gate fires correctly when grasp_z ≠ beam z).
         """
         if self._left_index is None or self._right_index is None:
             return False
-        return (self._descent_max_axis_err_l < GRASP_POS_TOL
-                and self._descent_max_axis_err_r < GRASP_POS_TOL)
+        return (self._descent_max_axis_err_l < CONFIG.grasp.grasp_pos_tol
+                and self._descent_max_axis_err_r < CONFIG.grasp.grasp_pos_tol)
 
     def _ee_slipped_from_beams(self) -> bool:
         """Distance between each EE and its assigned beam position; if either
-        exceeds ``ASSEMBLE_SLIP_DIST`` the grasp is suspect."""
+        exceeds ``CONFIG.beam_assemble.slip_dist`` the grasp is suspect."""
         if self._left_index is None or self._right_index is None:
             return False
         beam_l = self._states.beam_poses[self._left_index, :3]
         beam_r = self._states.beam_poses[self._right_index, :3]
         dl = float(((self._states.left_pose[:3]  - beam_l) ** 2).sum().sqrt())
         dr = float(((self._states.right_pose[:3] - beam_r) ** 2).sum().sqrt())
-        return dl > ASSEMBLE_SLIP_DIST or dr > ASSEMBLE_SLIP_DIST
+        return dl > CONFIG.beam_assemble.slip_dist or dr > CONFIG.beam_assemble.slip_dist
 
     def _move_up_reached(self) -> bool:
         """Position-only pregrasp gate (no orientation requirement)."""
@@ -1655,7 +1625,7 @@ class DualAssembly(TrajOptBase):
         pr = self._states.pregrasp[self._right_index, :3]
         dl = float(((self._states.left_pose[:3]  - pl) ** 2).sum().sqrt())
         dr = float(((self._states.right_pose[:3] - pr) ** 2).sum().sqrt())
-        return dl < MOVE_UP_TOL and dr < MOVE_UP_TOL
+        return dl < CONFIG.move_up.tol and dr < CONFIG.move_up.tol
 
     # ------------------------------------------------------------------
     # EE constraint helpers

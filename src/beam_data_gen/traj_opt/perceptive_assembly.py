@@ -1479,6 +1479,17 @@ class DualAssembly(TrajOptBase):
                     best = (pin_idx, pair_idx)
 
         if best is None:
+            n_pins = len(self._pin_inserted)
+            n_pins_placed = sum(self._pin_inserted)
+            print(
+                "[perceptive_assembly] _enter_pick_pin → ALL_DONE  "
+                f"hole_pairs={len(self._hole_pairs)} "
+                f"pinned_pairs={sorted(self._pinned_pairs)} "
+                f"pins_registered={n_pins} pins_placed={n_pins_placed} "
+                f"convergence_keys={sorted(self._convergence.keys())} "
+                f"hole_positions_set={self._hole_positions is not None} "
+                f"pin_positions_set={self._pin_positions is not None}"
+            )
             self._active_pin_idx = None
             self._active_hole_pair_idx = None
             self._goto(State.ALL_DONE)

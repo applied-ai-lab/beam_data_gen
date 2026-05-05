@@ -154,13 +154,13 @@ LEARNING_RATE: float = 0.25
 # Snap radii (metres). Inside the radius the per-state gradient is replaced
 # by one whose integrator step lands exactly on the target, bypassing the
 # asymptotic shrinkage of a quadratic loss. Set to 0.0 to disable.
-DESCENT_SNAP_RADIUS:  float = 0.04
-ASSEMBLE_SNAP_RADIUS: float = 0.03
-import os as _os
-if _os.environ.get('DISABLE_ASSEMBLE_SNAP', '0') == '1':
-    ASSEMBLE_SNAP_RADIUS = 0.0
-if _os.environ.get('DISABLE_DESCENT_SNAP', '0') == '1':
-    DESCENT_SNAP_RADIUS = 0.0
+DESCENT_SNAP_RADIUS:        float = 0.04
+ASSEMBLE_SNAP_RADIUS:       float = 0.03
+# Pin-phase snap radii — kept distinct from the beam-phase constants so
+# pin pre-insertion / insertion can be tuned independently of beam descent
+# / dual-assemble.
+PIN_PREGRASP_SNAP_RADIUS:   float = 0.04   # MOVE_TO_HOLE_PREGRASP snap
+PIN_INSERTION_SNAP_RADIUS:  float = 0.05   # INSERT_PIN snap
 
 
 # ---------------------------------------------------------------------------
@@ -1389,10 +1389,11 @@ class DualAssembly(TrajOptBase):
         ``_left_pin_home`` so both arms park at the pin-phase home before
         the PTU is commanded to PIN_VIEW.
 
-        Snap branch reuses ``DESCENT_SNAP_RADIUS`` for ``DESCEND_TO_PIN``
-        and ``ASSEMBLE_SNAP_RADIUS`` for ``INSERT_PIN`` so the pin pickup /
-        insertion gradient lands exactly on the target inside the radius
-        (same trick as ``_grad_descending``).
+        Snap branch uses ``DESCENT_SNAP_RADIUS`` for ``DESCEND_TO_PIN``,
+        ``PIN_PREGRASP_SNAP_RADIUS`` for ``MOVE_TO_HOLE_PREGRASP`` and
+        ``PIN_INSERTION_SNAP_RADIUS`` for ``INSERT_PIN`` so the pickup /
+        pre-insertion / insertion gradient lands exactly on the target
+        inside the radius (same trick as ``_grad_descending``).
         """
         loss_r = ((self._states.right_pose - self._right_pin_home) ** 2).sum()
         self._gradients.right_pose = grad(
@@ -1409,8 +1410,10 @@ class DualAssembly(TrajOptBase):
         snap_r = 0.0
         if self._state == State.DESCEND_TO_PIN:
             snap_r = DESCENT_SNAP_RADIUS
+        elif self._state == State.MOVE_TO_HOLE_PREGRASP:
+            snap_r = PIN_PREGRASP_SNAP_RADIUS
         elif self._state == State.INSERT_PIN:
-            snap_r = ASSEMBLE_SNAP_RADIUS
+            snap_r = PIN_INSERTION_SNAP_RADIUS
 
         if snap_r > 0.0 and LEARNING_RATE > 0.0:
             with torch.no_grad():

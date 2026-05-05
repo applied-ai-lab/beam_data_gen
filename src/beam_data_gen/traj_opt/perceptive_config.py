@@ -149,6 +149,13 @@ class PinInsertionConfig:
     # Step budget before INSERT_PIN gives up and releases anyway —
     # prevents a misaligned insertion deadlocking the FSM.
     timeout_steps: int = 35
+    # Step budget for MOVE_TO_HOLE_PREGRASP before the FSM bails out
+    # and lifts to RECOVER_INSERTION_PREGRASP for a retry.
+    pregrasp_timeout_steps: int = 35
+    # Vertical lift (m) applied during RECOVER_INSERTION_PREGRASP —
+    # the EE moves up this far above wherever it was when the
+    # MOVE_TO_HOLE_PREGRASP timeout fired, then retries.
+    recovery_z_delta: float = 0.10
 
 
 @dataclass(frozen=True)

@@ -205,6 +205,7 @@ class State(IntEnum):
     PIN_RECOVERY_RELEASE   = 23  # open gripper on grasp/insert failure (1 step)
     PIN_RECOVERY_MOVE_UP   = 24  # lift, retry MOVE_TO_PIN_PREGRASP for same pin
     ALL_DONE               = 25  # terminal: all pins placed
+    RECOVER_INSERTION_PREGRASP = 26  # lift recovery_z_delta then retry MOVE_TO_HOLE_PREGRASP
 
 
 class PtuView(IntEnum):
@@ -461,6 +462,10 @@ class DualAssembly(TrajOptBase):
         self._active_hole_pair_idx: Optional[int] = None
         self._pin_phase_active: bool = False
         self._pin_insert_counter: int = 0
+        # Absolute z target for RECOVER_INSERTION_PREGRASP — captured
+        # at the moment MOVE_TO_HOLE_PREGRASP times out so the lift is
+        # always ``recovery_z_delta`` above the stuck pose.
+        self._insertion_recovery_target_z: Optional[float] = None
 
         # ---- Testing / diagnostics knobs. ----
         # Set step_mode = True to pause at every FSM state transition and wait
@@ -983,6 +988,17 @@ class DualAssembly(TrajOptBase):
         elif self._state == State.MOVE_TO_HOLE_PREGRASP:
             if (not skip_distance) and self._hole_pregrasp_reached():
                 self._goto(State.INSERT_PIN)
+            elif (not check_distance_only) and self._state_step >= CONFIG.pin.insertion.pregrasp_timeout_steps:
+                # Snapshot stuck z, then lift recovery_z_delta above it.
+                self._insertion_recovery_target_z = (
+                    float(self._states.left_pose[2])
+                    + CONFIG.pin.insertion.recovery_z_delta
+                )
+                self._goto(State.RECOVER_INSERTION_PREGRASP)
+
+        elif self._state == State.RECOVER_INSERTION_PREGRASP:
+            if (not skip_distance) and self._insertion_recovery_lift_reached():
+                self._goto(State.MOVE_TO_HOLE_PREGRASP)
 
         elif self._state == State.INSERT_PIN:
             # Linear pipeline — no retry.  Two exits, both → RELEASE_PIN:
@@ -1432,6 +1448,18 @@ class DualAssembly(TrajOptBase):
             return _t(mid[0], mid[1], z,
                       CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
+        if s == State.RECOVER_INSERTION_PREGRASP:
+            # Lift to the snapshot z (current EE z + recovery_z_delta
+            # captured at timeout), preserving xy and INWARD yaw so the
+            # subsequent MOVE_TO_HOLE_PREGRASP retry comes from directly
+            # above the same hole-pair midpoint.
+            cur = self._states.left_pose.detach()
+            target_z = (self._insertion_recovery_target_z
+                        if self._insertion_recovery_target_z is not None
+                        else float(cur[2]))
+            return _t(cur[0], cur[1], target_z,
+                      CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
+
         if s == State.PIN_RECOVERY_MOVE_UP:
             cur = self._states.left_pose.detach()
             return _t(cur[0], cur[1], CONFIG.move_up.z, cur[3], cur[4])
@@ -1528,6 +1556,13 @@ class DualAssembly(TrajOptBase):
 
     def _left_lift_reached(self) -> bool:
         return abs(float(self._states.left_pose[2]) - CONFIG.move_up.z) < CONFIG.move_up.tol
+
+    def _insertion_recovery_lift_reached(self) -> bool:
+        """Left EE within move_up.tol of the recovery z snapshot."""
+        if self._insertion_recovery_target_z is None:
+            return True  # safety: no snapshot → don't deadlock the retry.
+        return (abs(float(self._states.left_pose[2]) - self._insertion_recovery_target_z)
+                < CONFIG.move_up.tol)
 
     def _pin_yaw_reached(self) -> bool:
         cur_sin = float(self._states.left_pose[3])

@@ -242,6 +242,36 @@ class State(IntEnum):
     ALL_DONE               = 25  # terminal: all pins placed
 
 
+class PtuView(IntEnum):
+    """Desired PTU viewpoint, selected per FSM state.
+
+    FORWARD points the camera at the workspace centre (good for beam +
+    hole AprilTag tracking).  SIDE points to the pin staging area (good
+    for pin AprilTag tracking).  The mapping is consumed by the FSM
+    adapter, which translates it to concrete pan/tilt setpoints.
+    """
+    FORWARD = 0
+    SIDE    = 1
+
+
+# Per-state PTU viewpoint.  States not listed default to FORWARD.
+_PTU_SIDE_STATES: frozenset = frozenset({
+    # Pin pickup phase: PTU points to the pin staging area so AprilTags
+    # on the pins are in view.
+    State.STOW_BOTH,
+    State.PICK_PIN,
+    State.MOVE_TO_PIN_PREGRASP,
+    State.DESCEND_TO_PIN,
+    State.CLOSE_PIN_GRIPPER,
+    State.LIFT_PIN,
+    # Post-insertion retreat + pickup-failure recovery: swing back to
+    # the pin staging area before re-attempting PICK_PIN.
+    State.RETREAT_PIN,
+    State.PIN_RECOVERY_RELEASE,
+    State.PIN_RECOVERY_MOVE_UP,
+})
+
+
 # ---------------------------------------------------------------------------
 # Hole-collinearity loss (lifted verbatim from dual_assembly.py:632-677 for
 # behavioural parity in DUAL_ASSEMBLE; isolated as a free function so it can
@@ -506,19 +536,18 @@ class DualAssembly(TrajOptBase):
             self._pin_inserted = [False] * positions.shape[0]
         self._pin_positions = positions
 
-    def is_pin_view_pose_required(self) -> bool:
-        """Whether the PTU should be commanded to its PIN_VIEW pose.
+    def desired_ptu_view(self) -> PtuView:
+        """Desired PTU viewpoint for the current FSM state.
 
-        True for the entire pin phase from STOW_BOTH entry onward, so
-        the camera slews to PIN_VIEW in parallel with the arms moving
-        to their pin-phase home.  False during beam phase and on
-        ALL_DONE.
+        Beam phase, hole-insertion phase (``ROTATE_PIN_INWARD`` …
+        ``RELEASE_PIN``), and ``ALL_DONE`` resolve to ``FORWARD`` so the
+        camera tracks beams and holes accurately.  The pin pickup
+        sub-phase and recovery/retreat states resolve to ``SIDE`` so
+        the camera tracks the pin staging area.
         """
-        if not self._pin_phase_active:
-            return False
-        if self._state == State.ALL_DONE:
-            return False
-        return True
+        if self._state in _PTU_SIDE_STATES:
+            return PtuView.SIDE
+        return PtuView.FORWARD
 
     @property
     def states(self) -> DualArmStates:

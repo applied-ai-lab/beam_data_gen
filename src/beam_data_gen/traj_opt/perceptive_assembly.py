@@ -171,15 +171,16 @@ if _os.environ.get('DISABLE_DESCENT_SNAP', '0') == '1':
 # "8 mm regrasp loop": below this, RELEASE_PIN may fire; above it, the
 # planner forces a recovery + regrasp instead of releasing.
 PIN_INSERT_TOL: float = 0.01
+PIN_INSERT_PREGRASP_TOL: float = 0.01
 
 # Cycles the pin must remain inside PIN_INSERT_TOL before RELEASE_PIN fires.
 PIN_CONVERGENCE_HYSTERESIS: int = 1
 
 # Yaw gate for ROTATE_PIN_INWARD (rad).
-PIN_YAW_TOL: float = 0.1
+PIN_YAW_TOL: float = 0.2
 
 # Hover height above pin / hole-midpoint during pin pregrasp (m).
-PIN_PREGRASP_OFFSET_Z: float = 0.16
+PIN_PREGRASP_OFFSET_Z: float = 0.20
 
 # Pregrasp / grasp yaw is forced to 0 during pin pickup —
 # (sin θ, cos θ) = (0, 1).
@@ -1551,7 +1552,7 @@ class DualAssembly(TrajOptBase):
             [mid[0], mid[1], MOVE_UP_Z],
             dtype=torch.float32, device=self.params.device,
         )
-        return float((self._states.left_pose[:3] - target).abs().max()) < PREGRASP_TOL
+        return float((self._states.left_pose[:3] - target).abs().max()) < PIN_INSERT_PREGRASP_TOL
 
     def _check_pin_insert_progress(self) -> bool:
         """Advance / reset the insert hysteresis counter and return True

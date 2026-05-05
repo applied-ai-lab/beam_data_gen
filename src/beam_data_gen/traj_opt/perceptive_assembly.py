@@ -180,7 +180,7 @@ PIN_CONVERGENCE_HYSTERESIS: int = 1
 PIN_YAW_TOL: float = 0.2
 
 # Hover height above pin / hole-midpoint during pin pregrasp (m).
-PIN_PREGRASP_OFFSET_Z: float = 0.15
+PIN_PREGRASP_OFFSET_Z: float = 0.20
 PIN_GRASP_OFFSET_Z: float = 0.01
 
 # Pregrasp / grasp yaw is forced to 0 during pin pickup —

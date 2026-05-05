@@ -133,7 +133,7 @@ class PinInsertionConfig:
     Linear pipeline: success or timeout, both go to RELEASE_PIN.
     There is no slip / recovery branch in pin insertion."""
     # Pre-insertion hover gate (max |Δx|, |Δy|, |Δz|).
-    pregrasp_tol: float = 0.005
+    pregrasp_tol: float = 0.01
     # Hover height for MOVE_TO_HOLE_PREGRASP, expressed as a delta
     # ABOVE the active hole-pair midpoint z (not absolute).  The pin
     # then descends from (mid_xy, mid_z + pregrasp_z_delta) to mid_z

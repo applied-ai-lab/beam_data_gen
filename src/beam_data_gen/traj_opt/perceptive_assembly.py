@@ -156,6 +156,11 @@ LEARNING_RATE: float = 0.4
 # asymptotic shrinkage of a quadratic loss. Set to 0.0 to disable.
 DESCENT_SNAP_RADIUS:  float = 0.04
 ASSEMBLE_SNAP_RADIUS: float = 0.02
+import os as _os
+if _os.environ.get('DISABLE_ASSEMBLE_SNAP', '0') == '1':
+    ASSEMBLE_SNAP_RADIUS = 0.0
+if _os.environ.get('DISABLE_DESCENT_SNAP', '0') == '1':
+    DESCENT_SNAP_RADIUS = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -593,16 +598,32 @@ class DualAssembly(TrajOptBase):
             self._states.requires_grad()
             gradients = self._step_gradients()
 
-            # Apply gradient with per-arm velocity limiting.
-            delta_l = self._limit_ee_delta(LEARNING_RATE * gradients.left_pose)
-            delta_r = self._limit_ee_delta(LEARNING_RATE * gradients.right_pose)
-            self._states.left_pose  = self._states.left_pose  - delta_l
-            self._states.right_pose = self._states.right_pose - delta_r
-            self._states.beam_poses = self._states.beam_poses - LEARNING_RATE * gradients.beam_poses
-            self._states.pregrasp   = self._states.pregrasp   - LEARNING_RATE * gradients.pregrasp
+            # Pre-step distance gate evaluation: if a position-based
+            # threshold is already satisfied (grasp contact, pair
+            # converged, lift reached, …), transition the FSM now and
+            # emit no further motion this step.  Without this the snap
+            # branch would overshoot the gate and tow the beam through
+            # the close-gripper transition.
+            _pre_state = self._state
+            self._evaluate_step_transitions(check_distance_only=True)
+            _gate_fired = (self._state != _pre_state)
 
-            # Enforce workspace bounds (z, y) for each arm plus pregrasp z.
-            self._clamp_ee_poses()
+            if _gate_fired:
+                # State transitioned (and any idle resolution has run).
+                # Skip applying the stale gradient — the next step will
+                # plan from the new state.
+                self._states.detach()
+            else:
+                # Apply gradient with per-arm velocity limiting.
+                delta_l = self._limit_ee_delta(LEARNING_RATE * gradients.left_pose)
+                delta_r = self._limit_ee_delta(LEARNING_RATE * gradients.right_pose)
+                self._states.left_pose  = self._states.left_pose  - delta_l
+                self._states.right_pose = self._states.right_pose - delta_r
+                self._states.beam_poses = self._states.beam_poses - LEARNING_RATE * gradients.beam_poses
+                self._states.pregrasp   = self._states.pregrasp   - LEARNING_RATE * gradients.pregrasp
+
+                # Enforce workspace bounds (z, y) for each arm plus pregrasp z.
+                self._clamp_ee_poses()
 
             self._states.detach()
 
@@ -633,11 +654,15 @@ class DualAssembly(TrajOptBase):
             self._particle_trajectories.gripper_particles[:, k, 0] = float(self._gripper_closed[0])
             self._particle_trajectories.gripper_particles[:, k, 1] = float(self._gripper_closed[1])
 
-            # Re-evaluate the gradient-driven transition gates against the
-            # latest losses so the FSM can advance mid-rollout.
+            # Post-step: time-based logic only (timeouts, slip counter,
+            # state-step counter increment).  Distance gates ran BEFORE
+            # the gradient against the actual robot state — running them
+            # again here would fire on the planner's optimistic post-step
+            # prediction and exit a state long before the real arm has
+            # arrived at the gate threshold.
             self._hand_losses.calc_losses(self._states)
             self._hand_losses.calc_prob()
-            self._evaluate_step_transitions()
+            self._evaluate_step_transitions(skip_distance=True)
 
         # Step-mode: pause on every FSM state transition so a developer can
         # inspect the system state before the next planning cycle.  Activated
@@ -821,55 +846,76 @@ class DualAssembly(TrajOptBase):
             self._slip_counter = 0
             self._goto(State.PIN_RECOVERY_MOVE_UP)
 
-    def _evaluate_step_transitions(self) -> None:
-        """Check gradient-driven gates after each integration step."""
+    def _evaluate_step_transitions(self, check_distance_only: bool = False,
+                                   skip_distance: bool = False) -> None:
+        """Check gradient-driven gates around each integration step.
+
+        Distance-based gates (``_lift_reached``, ``_grasp_contact``,
+        ``_active_pair_converged``, ``_pregrasp_reached_5dof``, …) are
+        evaluated against the planner's current state.  Because callers
+        re-seed ``left_pose`` / ``right_pose`` from the actual robot
+        state at the start of each cycle, these gates *must* run BEFORE
+        the gradient step (``check_distance_only=True``) — otherwise the
+        planner's unrestricted post-step prediction overshoots the gate
+        and transitions while the real arm is still nowhere near the
+        threshold.
+
+        Time-based logic (timeouts, slip counter, per-state step
+        counter increment) runs AFTER the gradient step
+        (``skip_distance=True``).  The two passes together fully replace
+        the previous single post-step evaluation.
+        """
         if self._state == State.GO_HOME:
-            if self._home_reached() or self._state_step >= GO_HOME_TIMEOUT_STEPS:
+            if (not skip_distance) and self._home_reached():
+                self._goto(State.PICK_TASK)
+                self._enter_pick_task()
+            elif (not check_distance_only) and self._state_step >= GO_HOME_TIMEOUT_STEPS:
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
 
         elif self._state == State.MOVE_TO_PREGRASP:
-            if self._pregrasp_reached_5dof():
+            if (not skip_distance) and self._pregrasp_reached_5dof():
                 self._goto(State.DESCENDING)
 
         elif self._state == State.DESCENDING:
-            if self._grasp_contact():
+            if (not skip_distance) and self._grasp_contact():
                 self._goto(State.CLOSE_GRIPPER)
                 # Resolve the 1-step CLOSE_GRIPPER immediately so the next
                 # rollout step starts in READY (and then DUAL_ASSEMBLE).
                 self._evaluate_idle_transitions()
                 self._evaluate_idle_transitions()
-            elif self._state_step >= DESCEND_TIMEOUT_STEPS:
+            elif (not check_distance_only) and self._state_step >= DESCEND_TIMEOUT_STEPS:
                 self._goto(State.RECOVERY_RELEASE)
                 self._evaluate_idle_transitions()  # opens grippers, → MOVE_UP
 
         elif self._state == State.DUAL_ASSEMBLE:
             # Convergence — only checked here and in PICK_TASK.
-            if self._active_pair_converged():
+            if (not skip_distance) and self._active_pair_converged():
                 self._latch_active_pair_converged()
                 self._goto(State.RELEASE_GRIPPER)
                 self._evaluate_idle_transitions()  # opens grippers, → MOVE_AWAY
                 return
-            # Slip detector — drives recovery without releasing convergence.
-            if self._ee_slipped_from_beams():
-                self._slip_counter += 1
-            else:
-                self._slip_counter = 0
-            if self._slip_counter >= ASSEMBLE_SLIP_STEPS:
-                self._slip_counter = 0
-                self._goto(State.RECOVERY_RELEASE)
-                self._evaluate_idle_transitions()
-                return
-            if self._state_step >= ASSEMBLE_TIMEOUT_STEPS:
-                self._goto(State.RECOVERY_RELEASE)
-                self._evaluate_idle_transitions()
+            if not check_distance_only:
+                # Slip detector — drives recovery without releasing convergence.
+                if self._ee_slipped_from_beams():
+                    self._slip_counter += 1
+                else:
+                    self._slip_counter = 0
+                if self._slip_counter >= ASSEMBLE_SLIP_STEPS:
+                    self._slip_counter = 0
+                    self._goto(State.RECOVERY_RELEASE)
+                    self._evaluate_idle_transitions()
+                    return
+                if self._state_step >= ASSEMBLE_TIMEOUT_STEPS:
+                    self._goto(State.RECOVERY_RELEASE)
+                    self._evaluate_idle_transitions()
 
         elif self._state == State.RECOVERY_MOVE_UP:
-            if self._lift_reached():
+            if (not skip_distance) and self._lift_reached():
                 self._goto(State.MOVE_TO_PREGRASP)
 
         elif self._state == State.MOVE_AWAY:
-            if self._lift_reached():
+            if (not skip_distance) and self._lift_reached():
                 self._goto(State.PICK_TASK)
                 self._enter_pick_task()
 
@@ -884,68 +930,70 @@ class DualAssembly(TrajOptBase):
             # real data.
             fresh_pins = (self._pin_update_counter
                           > self._pin_phase_entry_counter)
-            if self._at_pin_home() and fresh_pins:
+            if (not skip_distance) and self._at_pin_home() and fresh_pins:
                 self._goto(State.PICK_PIN)
                 self._evaluate_idle_transitions()  # resolve PICK_PIN
 
         elif self._state == State.MOVE_TO_PIN_PREGRASP:
-            if self._pin_pregrasp_reached():
+            if (not skip_distance) and self._pin_pregrasp_reached():
                 self._goto(State.DESCEND_TO_PIN)
 
         elif self._state == State.DESCEND_TO_PIN:
-            if self._pin_grasp_contact():
+            if (not skip_distance) and self._pin_grasp_contact():
                 self._goto(State.CLOSE_PIN_GRIPPER)
                 self._evaluate_idle_transitions()  # → LIFT_PIN
-            elif self._state_step >= DESCEND_TIMEOUT_STEPS:
+            elif (not check_distance_only) and self._state_step >= DESCEND_TIMEOUT_STEPS:
                 self._goto(State.PIN_RECOVERY_RELEASE)
                 self._evaluate_idle_transitions()  # → PIN_RECOVERY_MOVE_UP
 
         elif self._state == State.LIFT_PIN:
-            if self._left_lift_reached():
+            if (not skip_distance) and self._left_lift_reached():
                 self._goto(State.ROTATE_PIN_INWARD)
 
         elif self._state == State.ROTATE_PIN_INWARD:
-            if self._pin_yaw_reached():
+            if (not skip_distance) and self._pin_yaw_reached():
                 self._goto(State.MOVE_TO_HOLE_PREGRASP)
 
         elif self._state == State.MOVE_TO_HOLE_PREGRASP:
-            if self._hole_pregrasp_reached():
+            if (not skip_distance) and self._hole_pregrasp_reached():
                 self._goto(State.INSERT_PIN)
 
         elif self._state == State.INSERT_PIN:
             # Convergence — the "8 mm regrasp loop" entry point. RELEASE_PIN
             # is reachable ONLY from here; every other exit forces recovery.
-            if self._check_pin_insert_progress():
+            if (not skip_distance) and self._check_pin_insert_progress():
                 self._slip_counter = 0
                 self._goto(State.RELEASE_PIN)
                 self._evaluate_idle_transitions()  # opens left, → RETREAT_PIN
                 return
-            if self._pin_slipped():
-                self._slip_counter += 1
-            else:
-                self._slip_counter = 0
-            if self._slip_counter >= ASSEMBLE_SLIP_STEPS:
-                self._slip_counter = 0
-                self._pin_insert_counter = 0
-                self._goto(State.PIN_RECOVERY_RELEASE)
-                self._evaluate_idle_transitions()
-                return
-            if self._state_step >= ASSEMBLE_TIMEOUT_STEPS:
-                self._pin_insert_counter = 0
-                self._goto(State.PIN_RECOVERY_RELEASE)
-                self._evaluate_idle_transitions()
+            if not check_distance_only:
+                if self._pin_slipped():
+                    self._slip_counter += 1
+                else:
+                    self._slip_counter = 0
+                if self._slip_counter >= ASSEMBLE_SLIP_STEPS:
+                    self._slip_counter = 0
+                    self._pin_insert_counter = 0
+                    self._goto(State.PIN_RECOVERY_RELEASE)
+                    self._evaluate_idle_transitions()
+                    return
+                if self._state_step >= ASSEMBLE_TIMEOUT_STEPS:
+                    self._pin_insert_counter = 0
+                    self._goto(State.PIN_RECOVERY_RELEASE)
+                    self._evaluate_idle_transitions()
 
         elif self._state == State.RETREAT_PIN:
-            if self._left_lift_reached():
+            if (not skip_distance) and self._left_lift_reached():
                 self._goto(State.PICK_PIN)
                 self._evaluate_idle_transitions()  # → MOVE_TO_PIN_PREGRASP or ALL_DONE
 
         elif self._state == State.PIN_RECOVERY_MOVE_UP:
-            if self._left_lift_reached():
+            if (not skip_distance) and self._left_lift_reached():
                 self._goto(State.MOVE_TO_PIN_PREGRASP)
 
-        # GO_HOME counter
-        self._state_step += 1
+        # Per-state step counter — only advanced on the post-step pass.
+        if not check_distance_only:
+            self._state_step += 1
 
     def _goto(self, new_state: State) -> None:
         """Centralised state transition — resets the per-state step counter."""
@@ -1256,8 +1304,8 @@ class DualAssembly(TrajOptBase):
         ``_left_pin_home`` so both arms park at the pin-phase home before
         the PTU is commanded to PIN_VIEW.
 
-        Snap branch reuses ``descent_snap_radius`` for ``DESCEND_TO_PIN``
-        and ``assemble_snap_radius`` for ``INSERT_PIN`` so the pin pickup /
+        Snap branch reuses ``DESCENT_SNAP_RADIUS`` for ``DESCEND_TO_PIN``
+        and ``ASSEMBLE_SNAP_RADIUS`` for ``INSERT_PIN`` so the pin pickup /
         insertion gradient lands exactly on the target inside the radius
         (same trick as ``_grad_descending``).
         """
@@ -1275,9 +1323,9 @@ class DualAssembly(TrajOptBase):
 
         snap_r = 0.0
         if self._state == State.DESCEND_TO_PIN:
-            snap_r = self.descent_snap_radius
+            snap_r = DESCENT_SNAP_RADIUS
         elif self._state == State.INSERT_PIN:
-            snap_r = self.assemble_snap_radius
+            snap_r = ASSEMBLE_SNAP_RADIUS
 
         if snap_r > 0.0 and LEARNING_RATE > 0.0:
             with torch.no_grad():

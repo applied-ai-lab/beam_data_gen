@@ -465,15 +465,6 @@ class DualAssembly(TrajOptBase):
         self._active_hole_pair_idx: Optional[int] = None
         self._pin_phase_active: bool = False
         self._pin_insert_counter: int = 0
-        # Monotonic counter, incremented on every ``set_pin_positions``
-        # call.  ``_pin_phase_entry_counter`` snapshots it on entering
-        # STOW_BOTH so the FSM can wait for a *fresh* pin observation —
-        # one that arrived after pin phase was entered, hence after the
-        # PTU was commanded to its pin-view pose and the AprilTag detector
-        # re-acquired the pins.  Without this gate, STOW_BOTH could exit
-        # using stale coordinates cached from before the PTU moved.
-        self._pin_update_counter: int = 0
-        self._pin_phase_entry_counter: int = -1
 
         # ---- Testing / diagnostics knobs. ----
         # Set step_mode = True to pause at every FSM state transition and wait
@@ -513,17 +504,14 @@ class DualAssembly(TrajOptBase):
         if self._pin_positions is None:
             self._pin_inserted = [False] * positions.shape[0]
         self._pin_positions = positions
-        self._pin_update_counter += 1
 
     def is_pin_view_pose_required(self) -> bool:
         """Whether the PTU should be commanded to its PIN_VIEW pose.
 
         True for the entire pin phase from STOW_BOTH entry onward, so
         the camera slews to PIN_VIEW in parallel with the arms moving
-        to their pin-phase home.  This lets the AprilTag pipeline start
-        producing fresh pin detections before STOW_BOTH's exit gate
-        (``_at_pin_home() AND fresh_pins``) is even checked.  False
-        during beam phase and on ALL_DONE.
+        to their pin-phase home.  False during beam phase and on
+        ALL_DONE.
         """
         if not self._pin_phase_active:
             return False
@@ -971,16 +959,9 @@ class DualAssembly(TrajOptBase):
 
         # ---- Pin phase ----
         elif self._state == State.STOW_BOTH:
-            # Wait for both arms to park at the pin-phase home AND a
-            # fresh pin observation post-pin-phase-entry.  Only after both
-            # conditions hold does the FSM advance to PICK_PIN — at which
-            # point the PTU will already have been commanded to PIN_VIEW
-            # (the trigger fires once we leave STOW_BOTH) and a fresh
-            # observation will have been delivered, so PICK_PIN runs on
-            # real data.
-            fresh_pins = (self._pin_update_counter
-                          > self._pin_phase_entry_counter)
-            if (not skip_distance) and self._at_pin_home() and fresh_pins:
+            # Wait for both arms to park at the pin-phase home, then
+            # advance to PICK_PIN.
+            if (not skip_distance) and self._at_pin_home():
                 self._goto(State.PICK_PIN)
                 self._evaluate_idle_transitions()  # resolve PICK_PIN
 
@@ -1095,12 +1076,8 @@ class DualAssembly(TrajOptBase):
             # this exact moment.  STOW_BOTH parks the right arm at
             # right_start (which also frees the PTU command, see
             # FrankAtls.publish_planner_diagnostics → PTU goes to PIN_VIEW)
-            # and waits for a fresh pin observation via the
-            # ``_pin_phase_entry_counter`` gate before advancing to
-            # PICK_PIN.  The left arm holds during STOW_BOTH, so it cannot
-            # move toward a pin it has never seen.
+            # before advancing to PICK_PIN.
             self._pin_phase_active = True
-            self._pin_phase_entry_counter = self._pin_update_counter
             self._goto(State.STOW_BOTH)
             return
 

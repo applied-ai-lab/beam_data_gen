@@ -180,7 +180,8 @@ PIN_CONVERGENCE_HYSTERESIS: int = 1
 PIN_YAW_TOL: float = 0.2
 
 # Hover height above pin / hole-midpoint during pin pregrasp (m).
-PIN_PREGRASP_OFFSET_Z: float = 0.20
+PIN_PREGRASP_OFFSET_Z: float = 0.15
+PIN_GRASP_OFFSET_Z: float = 0.01
 
 # Pregrasp / grasp yaw is forced to 0 during pin pickup —
 # (sin θ, cos θ) = (0, 1).
@@ -1416,7 +1417,7 @@ class DualAssembly(TrajOptBase):
                 return None
             pin = self._pin_positions[self._active_pin_idx]
             z_offset = (PIN_PREGRASP_OFFSET_Z
-                        if s == State.MOVE_TO_PIN_PREGRASP else 0.0)
+                        if s == State.MOVE_TO_PIN_PREGRASP else PIN_GRASP_OFFSET_Z)
             return _t(pin[0], pin[1], pin[2] + z_offset,
                       PIN_GRASP_SIN, PIN_GRASP_COS)
 
@@ -1527,7 +1528,7 @@ class DualAssembly(TrajOptBase):
             return False
         pin = self._pin_positions[self._active_pin_idx]
         target = torch.tensor(
-            [pin[0], pin[1], pin[2]],
+            [pin[0], pin[1], pin[2]+PIN_GRASP_OFFSET_Z],
             dtype=torch.float32, device=self.params.device,
         )
         return float((self._states.left_pose[:3] - target).abs().max()) < GRASP_POS_TOL

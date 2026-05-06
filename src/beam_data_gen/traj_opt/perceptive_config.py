@@ -142,7 +142,7 @@ class PinInsertionConfig:
     # ABOVE the active hole-pair midpoint z (not absolute).  The pin
     # then descends from (mid_xy, mid_z + pregrasp_z_delta) to mid_z
     # during INSERT_PIN.
-    pregrasp_z_delta: float = 0.075
+    pregrasp_z_delta: float = 0.12
     # Insertion success criterion — z is primary (confirms the pin
     # has descended into the hole); xy is a sanity check.
     z_tol:  float = 0.01
@@ -182,9 +182,9 @@ class PinOffsetConfig:
     # Cycles over which pin↔hand offsets are averaged.
     sample_cycles: int = 5
     # Hand pose held during ROTATE_PIN_INWARD and COMPUTE_PIN_OFFSET.
-    rotate_target_x: float = 0.37
+    rotate_target_x: float = 0.32
     rotate_target_y: float = 0.0
-    rotate_target_z: float = 0.93
+    rotate_target_z: float = 0.95
     # Maximum allowed Euclidean distance between perceived pin and hand
     # for a sample to be accepted into the offset average. Rejects bad
     # detections (latched filtered TFs from the staging area, mirrored

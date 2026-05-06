@@ -93,7 +93,7 @@ class SnapConfig:
     # Pin phase — independent of beam phase so they can be tuned in
     # isolation.  descent_radius above is reused for DESCEND_TO_PIN.
     pin_pregrasp_radius:  float = 0.05  # MOVE_TO_HOLE_PREGRASP
-    pin_insertion_radius: float = 0.10  # INSERT_PIN
+    pin_insertion_radius: float = 0.00  # INSERT_PIN
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ class PinInsertionConfig:
     timeout_steps: int = 10
     # Step budget for MOVE_TO_HOLE_PREGRASP before the FSM bails out
     # and lifts to RECOVER_INSERTION_PREGRASP for a retry.
-    pregrasp_timeout_steps: int = 35
+    pregrasp_timeout_steps: int = 50
     # Vertical lift (m) applied during RECOVER_INSERTION_PREGRASP —
     # the EE moves up this far above wherever it was when the
     # MOVE_TO_HOLE_PREGRASP timeout fired, then retries.

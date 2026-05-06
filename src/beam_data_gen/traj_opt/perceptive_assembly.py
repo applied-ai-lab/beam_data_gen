@@ -1454,11 +1454,16 @@ class DualAssembly(TrajOptBase):
             # captured at timeout), preserving xy and INWARD yaw so the
             # subsequent MOVE_TO_HOLE_PREGRASP retry comes from directly
             # above the same hole-pair midpoint.
+            if self._active_hole_pair_idx is None or self._hole_positions is None:
+                return None
+            a, b = self._hole_pairs[self._active_hole_pair_idx]
+            mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+
             cur = self._states.left_pose.detach()
             target_z = (self._insertion_recovery_target_z
                         if self._insertion_recovery_target_z is not None
                         else float(cur[2])+CONFIG.pin.insertion.recovery_z_delta)
-            return _t(cur[0], cur[1], target_z,
+            return _t(mid[0], mid[1], target_z,
                       CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s == State.PIN_RECOVERY_MOVE_UP:

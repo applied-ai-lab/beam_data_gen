@@ -124,7 +124,7 @@ class PinPickupConfig:
     # pickup can be tightened independently.
     pregrasp_tol:      float = 0.015
     # Z offset above pin centre at the contact gate.
-    grasp_offset_z:    float = 0.01
+    grasp_offset_z:    float = 0.00
     # Pregrasp / grasp yaw is forced to 0 during pin pickup —
     # (sin θ, cos θ) = (0, 1).
     grasp_yaw_sin: float = 0.0

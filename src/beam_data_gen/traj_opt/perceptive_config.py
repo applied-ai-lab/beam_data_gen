@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 class GraspConfig:
     """Gates that fire during MOVE_TO_PREGRASP / DESCENDING."""
     # Per-axis max |Δx|, |Δy|, |Δz| for the pregrasp gate to fire.
-    pregrasp_tol: float = 0.03
+    pregrasp_tol: float = 0.02
     # Per-axis max |Δx|, |Δy|, |Δz| for the grasp-contact gate to fire.
     grasp_pos_tol: float = 0.013
 
@@ -76,7 +76,8 @@ class RecoveryPerturbationConfig:
     re-engage the same near-converged-but-stuck configuration."""
     # Per-arm y-axis displacement (m) applied at state entry. Arms move
     # in opposite directions along y, away from each other.
-    y_delta: float = 0.07
+    y_delta: float = 0.10
+    x_delta: float = 0.03
     # Per-arm Euclidean tolerance (m) on reaching the captured target.
     tol: float = 0.02
     # Step budget before the FSM bails to RECOVERY_RELEASE anyway.
@@ -102,7 +103,7 @@ class SnapConfig:
     the asymptotic shrinkage of a quadratic loss.  Set any radius to 0.0
     to disable that snap."""
     # Beam phase.
-    descent_radius:     float = 0.04   # DESCENDING
+    descent_radius:     float = 0.06   # DESCENDING
     assemble_radius:    float = 0.03   # DUAL_ASSEMBLE
     # Pin phase — independent of beam phase so they can be tuned in
     # isolation.  descent_radius above is reused for DESCEND_TO_PIN.
@@ -151,12 +152,12 @@ class PinInsertionConfig:
     Linear pipeline: success or timeout, both go to RELEASE_PIN.
     There is no slip / recovery branch in pin insertion."""
     # Pre-insertion hover gate (max |Δx|, |Δy|, |Δz|).
-    pregrasp_tol: float = 0.004
+    pregrasp_tol: float = 0.002
     # Hover height for MOVE_TO_HOLE_PREGRASP, expressed as a delta
     # ABOVE the active hole-pair midpoint z (not absolute).  The pin
     # then descends from (mid_xy, mid_z + pregrasp_z_delta) to mid_z
     # during INSERT_PIN.
-    pregrasp_z_delta: float = 0.12
+    pregrasp_z_delta: float = 0.09
     # Insertion success criterion — z is primary (confirms the pin
     # has descended into the hole); xy is a sanity check.
     z_tol:  float = 0.01
@@ -173,7 +174,7 @@ class PinInsertionConfig:
     # Vertical lift (m) applied during RECOVER_INSERTION_PREGRASP —
     # the EE moves up this far above wherever it was when the
     # MOVE_TO_HOLE_PREGRASP timeout fired, then retries.
-    recovery_z_delta: float = 0.06
+    recovery_z_delta: float = 0.12
 
 
 @dataclass(frozen=True)
@@ -195,14 +196,14 @@ class PinOffsetConfig:
     RECOVER_INSERTION_PREGRASP so the *pin* (not the hand) lands on the
     hole-pair midpoint, compensating for the imperfect grasp pose."""
     # Hand pose held during ROTATE_PIN_INWARD and COMPUTE_PIN_OFFSET.
-    rotate_target_x: float = 0.32
+    rotate_target_x: float = 0.28
     rotate_target_y: float = 0.0
-    rotate_target_z: float = 0.95
+    rotate_target_z: float = 1.0
     # Wall-clock duration (s) over which the wrapper-side calibrator
     # accumulates pin/hand TF samples before pushing the averaged
     # 6-DOF transform.  Longer = more averaging, but COMPUTE_PIN_OFFSET
     # blocks the planner cycle for this long once per pin pickup.
-    calibration_duration: float = 3.0
+    calibration_duration: float = 5.0
     # Maximum allowed Euclidean distance between perceived pin and hand
     # for a sample to be accepted into the calibration average. Rejects
     # stale / mis-associated tag detections that would otherwise poison
@@ -220,6 +221,7 @@ class PinHomeConfig:
     unobstructed view and keeps the right arm clear of the left arm's
     working volume during pin insertion."""
     y_offset: float = 0.20
+    tolerance: float = 0.06
 
 
 @dataclass(frozen=True)

@@ -1325,15 +1325,23 @@ class DualAssembly(TrajOptBase):
         arm currently at higher y moves further in +y, the other in -y —
         so the beams always separate regardless of arm-to-beam assignment.
         """
-        delta = CONFIG.recovery_perturbation.y_delta
+        delta_y = CONFIG.recovery_perturbation.y_delta
+        delta_x = CONFIG.recovery_perturbation.x_delta
         with torch.no_grad():
             l_xyz = self._states.left_pose[:3].detach().clone()
             r_xyz = self._states.right_pose[:3].detach().clone()
             sign_l = 1.0 if float(l_xyz[1]) >= float(r_xyz[1]) else -1.0
             l_target = l_xyz.clone()
             r_target = r_xyz.clone()
-            l_target[1] = l_target[1] + sign_l * delta
-            r_target[1] = r_target[1] - sign_l * delta
+
+            # Perturb X
+            l_target[0] = l_target[0]+delta_x
+            r_target[0] = r_target[0]+delta_x
+
+            # Perturb Y
+            l_target[1] = l_target[1] + sign_l * delta_y
+            r_target[1] = r_target[1] - sign_l * delta_y
+
         self._perturbation_target_left  = l_target
         self._perturbation_target_right = r_target
 
@@ -1512,7 +1520,8 @@ class DualAssembly(TrajOptBase):
         inside the radius (same trick as ``_grad_descending``).
         """
         loss_r = ((self._states.right_pose - self._right_pin_home) ** 2).sum()
-        self._gradients.right_pose = grad(
+        # Slow gradient descent here. We don't care about the movement that much so might as well.
+        self._gradients.right_pose = 0.5*grad(
             loss_r, self._states.right_pose, retain_graph=True
         )[0]
 
@@ -1522,6 +1531,10 @@ class DualAssembly(TrajOptBase):
 
         loss_l = ((self._states.left_pose - target) ** 2).sum()
         g_l = grad(loss_l, self._states.left_pose, retain_graph=True)[0]
+
+        # Hard-coded manual slow down on the STOW_AWAY behaviour for safety.
+        if self._state==State.STOW_BOTH:
+            g_l /= 1.5 
 
         snap_r = 0.0
         if self._state == State.DESCEND_TO_PIN:
@@ -1703,7 +1716,7 @@ class DualAssembly(TrajOptBase):
                    .sum().sqrt())
         dr = float(((self._states.right_pose[:3] - self._right_pin_home[:3]) ** 2)
                    .sum().sqrt())
-        return dl < CONFIG.move_up.tol and dr < CONFIG.move_up.tol
+        return dl < CONFIG.pin.home.tolerance and dr < 2*CONFIG.pin.home.tolerance
 
     def _pin_pregrasp_reached(self) -> bool:
         if self._active_pin_idx is None or self._pin_positions is None:

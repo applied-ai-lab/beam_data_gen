@@ -84,7 +84,6 @@ gradient producers) is new.
 
 from __future__ import annotations
 
-import math
 from enum import IntEnum
 from typing import List, Optional, Tuple
 
@@ -243,13 +242,6 @@ _PTU_SIDE_STATES: frozenset = frozenset({
     State.PIN_RECOVERY_RELEASE,
     State.PIN_RECOVERY_MOVE_UP,
 })
-
-
-def _quat_yaw(q: np.ndarray) -> float:
-    """Yaw (rad, around +z) of a unit quaternion in xyzw order."""
-    qx, qy, qz, qw = float(q[0]), float(q[1]), float(q[2]), float(q[3])
-    return math.atan2(2.0 * (qw * qz + qx * qy),
-                      1.0 - 2.0 * (qy * qy + qz * qz))
 
 
 # ---------------------------------------------------------------------------
@@ -489,18 +481,19 @@ class DualAssembly(TrajOptBase):
 
         # ---- Estimated pin position (calibration result, fed by wrapper). ----
         # The wrapper (FrankAtls) runs a high-rate (~30 Hz) calibrator that
-        # samples T_hand_pin over ~3 s while the planner holds at the rotate
-        # target, then pushes the resulting 6-DOF transform here via
-        # ``set_estimated_pin_position``.  Stored as
-        # ``(translation_xyz_world, quaternion_xyzw)`` in the world frame at
-        # calibration time (hand yaw is fixed at the inward rotate yaw, so a
-        # world-frame storage is well-defined).  ``None`` means "not yet
-        # calibrated for the active pin".  COMPUTE_PIN_OFFSET holds at the
-        # rotate target until this becomes non-None; downstream pin states
-        # (MOVE_TO_HOLE_PREGRASP / INSERT_PIN / RECOVER_INSERTION_PREGRASP)
-        # apply translation + yaw correction so the *pin* (not the hand)
-        # lands on the hole-pair midpoint.  Reset to None in
-        # ``_enter_pick_pin`` and in the RELEASE_PIN idle transition.
+        # samples ``pin_world − hand_world`` over ~3 s while the planner
+        # holds at the rotate target, then pushes the averaged translation
+        # here via ``set_estimated_pin_position``.  Stored as
+        # ``(translation_xyz_world, quaternion_xyzw)`` for API symmetry,
+        # but **only the translation is consumed** by the planner — the
+        # pin orientation is taken to equal the hand orientation, so the
+        # hand yaw target during MOVE_TO_HOLE_PREGRASP / INSERT_PIN /
+        # RECOVER_INSERTION_PREGRASP is unmodified by this offset (the
+        # wrapper currently always pushes identity for the quaternion).
+        # ``None`` means "not yet calibrated for the active pin";
+        # COMPUTE_PIN_OFFSET holds at the rotate target until this
+        # becomes non-None.  Reset to None in ``_enter_pick_pin`` and in
+        # the RELEASE_PIN idle transition.
         self._estimated_pin_position: Optional[Tuple[np.ndarray, np.ndarray]] = None
 
         # Measured (FK-on-/joint_states) EE positions in base_link, pushed
@@ -1599,22 +1592,18 @@ class DualAssembly(TrajOptBase):
             else:  # RETREAT_PIN — generic lift to the workspace MOVE_UP_Z.
                 z = CONFIG.move_up.z
             # Apply calibrated pin↔hand offset so the *pin* (not the hand)
-            # lands on the hole-pair midpoint.  RETREAT_PIN is a generic
-            # lift and ignores the offset.
-            sin_y = CONFIG.pin.rotate.inward_yaw_left_sin
-            cos_y = CONFIG.pin.rotate.inward_yaw_left_cos
+            # lands on the hole-pair midpoint.  Translation only — pin
+            # orientation is taken to equal hand orientation, so the
+            # hand yaw target is unmodified (inward yaw).  RETREAT_PIN
+            # is a generic lift and ignores the offset entirely.
             if s != State.RETREAT_PIN and self._estimated_pin_position is not None:
-                t_off, q_off = self._estimated_pin_position
+                t_off, _q_off = self._estimated_pin_position
                 x -= float(t_off[0])
                 y -= float(t_off[1])
                 z -= float(t_off[2])
-                # Yaw correction: rotate the desired pin yaw by the
-                # negative of the calibrated yaw delta so the hand ends
-                # up oriented such that the pin reaches the inward yaw.
-                dyaw = _quat_yaw(q_off)
-                c, s_ = math.cos(-dyaw), math.sin(-dyaw)
-                sin_y, cos_y = sin_y * c + cos_y * s_, cos_y * c - sin_y * s_
-            return _t(x, y, z, sin_y, cos_y)
+            return _t(x, y, z,
+                      CONFIG.pin.rotate.inward_yaw_left_sin,
+                      CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s == State.RECOVER_INSERTION_PREGRASP:
             # Lift to the snapshot z (current EE z + recovery_z_delta
@@ -1631,16 +1620,13 @@ class DualAssembly(TrajOptBase):
                         if self._insertion_recovery_target_z is not None
                         else float(cur[2])+CONFIG.pin.insertion.recovery_z_delta)
             x, y = float(mid[0]), float(mid[1])
-            sin_y = CONFIG.pin.rotate.inward_yaw_left_sin
-            cos_y = CONFIG.pin.rotate.inward_yaw_left_cos
             if self._estimated_pin_position is not None:
-                t_off, q_off = self._estimated_pin_position
+                t_off, _q_off = self._estimated_pin_position
                 x -= float(t_off[0])
                 y -= float(t_off[1])
-                dyaw = _quat_yaw(q_off)
-                c, s_ = math.cos(-dyaw), math.sin(-dyaw)
-                sin_y, cos_y = sin_y * c + cos_y * s_, cos_y * c - sin_y * s_
-            return _t(x, y, target_z, sin_y, cos_y)
+            return _t(x, y, target_z,
+                      CONFIG.pin.rotate.inward_yaw_left_sin,
+                      CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s == State.PIN_RECOVERY_MOVE_UP:
             cur = self._states.left_pose.detach()

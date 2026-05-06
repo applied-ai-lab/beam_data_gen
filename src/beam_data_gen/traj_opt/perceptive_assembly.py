@@ -481,6 +481,16 @@ class DualAssembly(TrajOptBase):
         self._pin_offset: Optional[np.ndarray] = None
         self._pin_offset_samples: List[np.ndarray] = []
 
+        # Measured (FK-on-/joint_states) EE positions in base_link, pushed
+        # by the wrapper each cycle via ``set_actual_hand_poses``.  Used
+        # *only* for pin-offset calibration so the offset captures the
+        # geometric grasp bias rather than planner-vs-controller tracking
+        # error (the planner's ``_states.left_pose`` is the gradient-evolved
+        # commanded pose, not the actual EE).  Falls back to
+        # ``_states.left_pose`` when unset (sim / unit tests).
+        self._actual_hand_left:  Optional[np.ndarray] = None
+        self._actual_hand_right: Optional[np.ndarray] = None
+
         # ---- Testing / diagnostics knobs. ----
         # Set step_mode = True to pause at every FSM state transition and wait
         # for an Enter keypress.  Safe to toggle at runtime; harmless when False.
@@ -507,6 +517,20 @@ class DualAssembly(TrajOptBase):
                 hole transform in the robot base frame.
         """
         self._hole_positions = positions
+
+    def set_actual_hand_poses(
+        self,
+        left_xyz:  Optional[np.ndarray],
+        right_xyz: Optional[np.ndarray],
+    ) -> None:
+        """Push the measured EE positions (FK on real /joint_states) for
+        the current cycle.  Used by COMPUTE_PIN_OFFSET so the calibrated
+        offset reflects the true pin↔hand geometry rather than the
+        planner's commanded pose."""
+        self._actual_hand_left  = (
+            None if left_xyz  is None else np.asarray(left_xyz,  dtype=np.float64))
+        self._actual_hand_right = (
+            None if right_xyz is None else np.asarray(right_xyz, dtype=np.float64))
 
     def set_pin_positions(self, positions: np.ndarray) -> None:
         """Update perceived pin positions — required every cycle once pin
@@ -1016,7 +1040,14 @@ class DualAssembly(TrajOptBase):
                         and self._pin_positions is not None):
                     pin = np.asarray(self._pin_positions[self._active_pin_idx],
                                      dtype=np.float64)
-                    hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
+                    # Use the *measured* hand pose (FK on /joint_states) so
+                    # the offset captures the true grasp bias.  Falls back
+                    # to the planner state in sim / unit tests where the
+                    # wrapper has not pushed a measured value.
+                    if self._actual_hand_left is not None:
+                        hand = self._actual_hand_left.astype(np.float64)
+                    else:
+                        hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
                     # Sanity gate: only accept samples where the perceived
                     # pin is within max_pin_hand_dist of the hand. Stale or
                     # mis-associated tag detections can sit metres away and

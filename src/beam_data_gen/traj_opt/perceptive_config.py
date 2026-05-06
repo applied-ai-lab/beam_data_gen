@@ -130,6 +130,11 @@ class PinPickupConfig:
     # (sin θ, cos θ) = (0, 1).
     grasp_yaw_sin: float = 0.0
     grasp_yaw_cos: float = 1.0
+    # Step budget for MOVE_TO_PIN_PREGRASP. If the per-axis pregrasp gate
+    # has not fired within this many planner steps, the FSM aborts the
+    # current pickup attempt and falls back to STOW_BOTH to re-park both
+    # arms before retrying.
+    pregrasp_timeout_steps: int = 50
 
 
 @dataclass(frozen=True)

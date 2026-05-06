@@ -1065,6 +1065,11 @@ class DualAssembly(TrajOptBase):
         elif self._state == State.MOVE_TO_PIN_PREGRASP:
             if (not skip_distance) and self._pin_pregrasp_reached():
                 self._goto(State.DESCEND_TO_PIN)
+            elif ((not check_distance_only)
+                    and self._state_step >= CONFIG.pin.pickup.pregrasp_timeout_steps):
+                # Pregrasp gate never fired — fall back to STOW_BOTH to
+                # re-park both arms, then PICK_PIN will reselect a target.
+                self._goto(State.STOW_BOTH)
 
         elif self._state == State.DESCEND_TO_PIN:
             if (not skip_distance) and self._pin_grasp_contact():

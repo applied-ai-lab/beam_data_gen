@@ -178,31 +178,35 @@ class PinInsertionConfig:
 
 @dataclass(frozen=True)
 class PinOffsetConfig:
-    """COMPUTE_PIN_OFFSET — calibrate the pin↔hand XYZ offset before
-    insertion.
+    """COMPUTE_PIN_OFFSET — calibrate the 6-DOF pin↔hand transform
+    before insertion.
 
     After ROTATE_PIN_INWARD, the hand is held at
     ``(rotate_target_x, rotate_target_y, rotate_target_z)`` (a pose
     chosen so the pin AprilTag remains inside the FORWARD camera FOV).
-    The FSM waits ``wait_cycles`` planner cycles for the arm to settle,
-    then averages ``sample_cycles`` observations of
-    ``pin_world − hand_world``.  The resulting constant XYZ offset is
-    subtracted from the hole-pair midpoint during
-    MOVE_TO_HOLE_PREGRASP / INSERT_PIN / RECOVER_INSERTION_PREGRASP so
-    the *pin* (not the hand) lands on the midpoint, compensating for
-    the imperfect grasp pose."""
-    # Settling cycles before sampling begins.
-    wait_cycles:   int = 10
-    # Cycles over which pin↔hand offsets are averaged.
-    sample_cycles: int = 15
+    The wrapper-side calibrator (``FrankAtls.maybe_run_pin_calibration``)
+    samples both the pin world pose and the hand world pose at TF rate
+    (~30 Hz) for ``calibration_duration`` seconds, averages translation
+    by mean and rotation by quaternion eigenvector mean, and pushes the
+    resulting 6-DOF transform into the planner via
+    ``set_estimated_pin_position``.  The planner subtracts translation
+    + rotates the hand yaw target by the inverse of the calibrated yaw
+    delta during MOVE_TO_HOLE_PREGRASP / INSERT_PIN /
+    RECOVER_INSERTION_PREGRASP so the *pin* (not the hand) lands on the
+    hole-pair midpoint, compensating for the imperfect grasp pose."""
     # Hand pose held during ROTATE_PIN_INWARD and COMPUTE_PIN_OFFSET.
     rotate_target_x: float = 0.32
     rotate_target_y: float = 0.0
     rotate_target_z: float = 0.95
+    # Wall-clock duration (s) over which the wrapper-side calibrator
+    # accumulates pin/hand TF samples before pushing the averaged
+    # 6-DOF transform.  Longer = more averaging, but COMPUTE_PIN_OFFSET
+    # blocks the planner cycle for this long once per pin pickup.
+    calibration_duration: float = 3.0
     # Maximum allowed Euclidean distance between perceived pin and hand
-    # for a sample to be accepted into the offset average. Rejects bad
-    # detections (latched filtered TFs from the staging area, mirrored
-    # tags) that would otherwise poison the calibration.
+    # for a sample to be accepted into the calibration average. Rejects
+    # stale / mis-associated tag detections that would otherwise poison
+    # the mean.
     max_pin_hand_dist: float = 0.05
 
 

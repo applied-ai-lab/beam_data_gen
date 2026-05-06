@@ -84,6 +84,7 @@ gradient producers) is new.
 
 from __future__ import annotations
 
+import math
 from enum import IntEnum
 from typing import List, Optional, Tuple
 
@@ -242,6 +243,13 @@ _PTU_SIDE_STATES: frozenset = frozenset({
     State.PIN_RECOVERY_RELEASE,
     State.PIN_RECOVERY_MOVE_UP,
 })
+
+
+def _quat_yaw(q: np.ndarray) -> float:
+    """Yaw (rad, around +z) of a unit quaternion in xyzw order."""
+    qx, qy, qz, qw = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+    return math.atan2(2.0 * (qw * qz + qx * qy),
+                      1.0 - 2.0 * (qy * qy + qz * qz))
 
 
 # ---------------------------------------------------------------------------
@@ -479,18 +487,21 @@ class DualAssembly(TrajOptBase):
         # always ``recovery_z_delta`` above the stuck pose.
         self._insertion_recovery_target_z: Optional[float] = None
 
-        # ---- Pin-offset calibration (COMPUTE_PIN_OFFSET). ----
-        # After the pin is grasped, lifted and rotated inward, the pin tag
-        # leaves the camera FOV.  Before insertion we hold the EE at a
-        # known target where the pin tag is still visible, wait
-        # ``compute_pin_offset_wait_cycles`` cycles for the arm to settle,
-        # then average ``compute_pin_offset_sample_cycles`` observations of
-        # ``pin_world - hand_world``.  The resulting XYZ offset is
-        # subtracted from the hole-midpoint target during
-        # MOVE_TO_HOLE_PREGRASP / INSERT_PIN so the *pin* (not the hand)
-        # lands on the midpoint.  Reset per-pin in ``_enter_pick_pin``.
-        self._pin_offset: Optional[np.ndarray] = None
-        self._pin_offset_samples: List[np.ndarray] = []
+        # ---- Estimated pin position (calibration result, fed by wrapper). ----
+        # The wrapper (FrankAtls) runs a high-rate (~30 Hz) calibrator that
+        # samples T_hand_pin over ~3 s while the planner holds at the rotate
+        # target, then pushes the resulting 6-DOF transform here via
+        # ``set_estimated_pin_position``.  Stored as
+        # ``(translation_xyz_world, quaternion_xyzw)`` in the world frame at
+        # calibration time (hand yaw is fixed at the inward rotate yaw, so a
+        # world-frame storage is well-defined).  ``None`` means "not yet
+        # calibrated for the active pin".  COMPUTE_PIN_OFFSET holds at the
+        # rotate target until this becomes non-None; downstream pin states
+        # (MOVE_TO_HOLE_PREGRASP / INSERT_PIN / RECOVER_INSERTION_PREGRASP)
+        # apply translation + yaw correction so the *pin* (not the hand)
+        # lands on the hole-pair midpoint.  Reset to None in
+        # ``_enter_pick_pin`` and in the RELEASE_PIN idle transition.
+        self._estimated_pin_position: Optional[Tuple[np.ndarray, np.ndarray]] = None
 
         # Measured (FK-on-/joint_states) EE positions in base_link, pushed
         # by the wrapper each cycle via ``set_actual_hand_poses``.  Used
@@ -528,6 +539,34 @@ class DualAssembly(TrajOptBase):
                 hole transform in the robot base frame.
         """
         self._hole_positions = positions
+
+    def set_estimated_pin_position(
+        self,
+        translation: Optional[np.ndarray],
+        quaternion:  Optional[np.ndarray] = None,
+    ) -> None:
+        """Push the 6-DOF hand→pin transform from the wrapper-side
+        calibrator.  ``translation`` is the world-frame ``pin - hand``
+        position (3,); ``quaternion`` is the world-frame ``q_pin · q_hand⁻¹``
+        rotation (4, xyzw).  Pass ``translation=None`` to clear.
+
+        Calibration is captured at the inward rotate yaw, so the planner
+        treats the offset as world-frame-constant for the duration of
+        the current pin.  ``_enter_pick_pin`` resets this back to None
+        so each new pin gets a fresh calibration window.
+        """
+        if translation is None:
+            self._estimated_pin_position = None
+            return
+        t = np.asarray(translation, dtype=np.float64).reshape(3)
+        if quaternion is None:
+            q = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+        else:
+            q = np.asarray(quaternion, dtype=np.float64).reshape(4)
+            n = float(np.linalg.norm(q))
+            if n > 0.0:
+                q = q / n
+        self._estimated_pin_position = (t, q)
 
     def set_actual_hand_poses(
         self,
@@ -909,6 +948,9 @@ class DualAssembly(TrajOptBase):
                 self._pin_inserted[self._active_pin_idx] = True
             self._pin_insert_counter = 0
             self._slip_counter = 0
+            # The 6-DOF estimated pin position belongs to *this* pin's
+            # grasp — clear it so the next pin pickup must recalibrate.
+            self._estimated_pin_position = None
             self._goto(State.RETREAT_PIN)
         elif self._state == State.PIN_RECOVERY_RELEASE:
             self._gripper_closed[0] = False
@@ -1045,48 +1087,18 @@ class DualAssembly(TrajOptBase):
 
         elif self._state == State.ROTATE_PIN_INWARD:
             if (not skip_distance) and self._rotate_pin_pose_reached():
-                # Reset accumulators for the new calibration window.
-                self._pin_offset = None
-                self._pin_offset_samples = []
+                # Calibration is now driven by the wrapper at TF rate; the
+                # planner only holds the rotate target and waits for the
+                # 6-DOF transform to be pushed via set_estimated_pin_position.
+                self._estimated_pin_position = None
                 self._goto(State.COMPUTE_PIN_OFFSET)
 
         elif self._state == State.COMPUTE_PIN_OFFSET:
-            # Time-based-only state: hold the rotate target while we wait
-            # for the arm to settle, then average a window of pin↔hand
-            # observations.  Distance gate is unused (gradient producer
-            # keeps the EE on target via _grad_pin_phase).
-            if not check_distance_only:
-                wait = CONFIG.pin.offset.wait_cycles
-                n_sample = CONFIG.pin.offset.sample_cycles
-                step = self._state_step  # incremented at the bottom of this fn
-                if (wait <= step < wait + n_sample
-                        and self._active_pin_idx is not None
-                        and self._pin_positions is not None):
-                    pin = np.asarray(self._pin_positions[self._active_pin_idx],
-                                     dtype=np.float64)
-                    # Use the *measured* hand pose (FK on /joint_states) so
-                    # the offset captures the true grasp bias.  Falls back
-                    # to the planner state in sim / unit tests where the
-                    # wrapper has not pushed a measured value.
-                    if self._actual_hand_left is not None:
-                        hand = self._actual_hand_left.astype(np.float64)
-                    else:
-                        hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
-                    # Sanity gate: only accept samples where the perceived
-                    # pin is within max_pin_hand_dist of the hand. Stale or
-                    # mis-associated tag detections can sit metres away and
-                    # would otherwise dominate the mean.
-                    if np.linalg.norm(pin - hand) <= CONFIG.pin.offset.max_pin_hand_dist:
-                        self._pin_offset_samples.append(pin - hand)
-                if step >= wait + n_sample:
-                    if self._pin_offset_samples:
-                        self._pin_offset = np.mean(
-                            np.stack(self._pin_offset_samples, axis=0), axis=0)
-                    else:
-                        # No pin observation arrived during the window —
-                        # fall back to zero offset (no correction).
-                        self._pin_offset = np.zeros(3, dtype=np.float64)
-                    self._goto(State.MOVE_TO_HOLE_PREGRASP)
+            # Hold at the rotate target until the wrapper pushes a
+            # calibrated 6-DOF transform.  Gradient producer keeps the EE
+            # on target via _grad_pin_phase; we only watch the variable.
+            if self._estimated_pin_position is not None:
+                self._goto(State.MOVE_TO_HOLE_PREGRASP)
 
         elif self._state == State.MOVE_TO_HOLE_PREGRASP:
             if (not skip_distance) and self._hole_pregrasp_reached():
@@ -1589,12 +1601,20 @@ class DualAssembly(TrajOptBase):
             # Apply calibrated pin↔hand offset so the *pin* (not the hand)
             # lands on the hole-pair midpoint.  RETREAT_PIN is a generic
             # lift and ignores the offset.
-            if s != State.RETREAT_PIN and self._pin_offset is not None:
-                x -= float(self._pin_offset[0])
-                y -= float(self._pin_offset[1])
-                z -= float(self._pin_offset[2])
-            return _t(x, y, z,
-                      CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
+            sin_y = CONFIG.pin.rotate.inward_yaw_left_sin
+            cos_y = CONFIG.pin.rotate.inward_yaw_left_cos
+            if s != State.RETREAT_PIN and self._estimated_pin_position is not None:
+                t_off, q_off = self._estimated_pin_position
+                x -= float(t_off[0])
+                y -= float(t_off[1])
+                z -= float(t_off[2])
+                # Yaw correction: rotate the desired pin yaw by the
+                # negative of the calibrated yaw delta so the hand ends
+                # up oriented such that the pin reaches the inward yaw.
+                dyaw = _quat_yaw(q_off)
+                c, s_ = math.cos(-dyaw), math.sin(-dyaw)
+                sin_y, cos_y = sin_y * c + cos_y * s_, cos_y * c - sin_y * s_
+            return _t(x, y, z, sin_y, cos_y)
 
         if s == State.RECOVER_INSERTION_PREGRASP:
             # Lift to the snapshot z (current EE z + recovery_z_delta
@@ -1611,11 +1631,16 @@ class DualAssembly(TrajOptBase):
                         if self._insertion_recovery_target_z is not None
                         else float(cur[2])+CONFIG.pin.insertion.recovery_z_delta)
             x, y = float(mid[0]), float(mid[1])
-            if self._pin_offset is not None:
-                x -= float(self._pin_offset[0])
-                y -= float(self._pin_offset[1])
-            return _t(x, y, target_z,
-                      CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
+            sin_y = CONFIG.pin.rotate.inward_yaw_left_sin
+            cos_y = CONFIG.pin.rotate.inward_yaw_left_cos
+            if self._estimated_pin_position is not None:
+                t_off, q_off = self._estimated_pin_position
+                x -= float(t_off[0])
+                y -= float(t_off[1])
+                dyaw = _quat_yaw(q_off)
+                c, s_ = math.cos(-dyaw), math.sin(-dyaw)
+                sin_y, cos_y = sin_y * c + cos_y * s_, cos_y * c - sin_y * s_
+            return _t(x, y, target_z, sin_y, cos_y)
 
         if s == State.PIN_RECOVERY_MOVE_UP:
             cur = self._states.left_pose.detach()
@@ -1680,8 +1705,7 @@ class DualAssembly(TrajOptBase):
         self._slip_counter = 0
         # Each new pin needs a fresh calibration — old offset belongs to
         # the previous (now placed) pin's grasp.
-        self._pin_offset = None
-        self._pin_offset_samples = []
+        self._estimated_pin_position = None
         self._goto(State.MOVE_TO_PIN_PREGRASP)
 
     # ---- Pin-phase gates ----
@@ -1762,8 +1786,10 @@ class DualAssembly(TrajOptBase):
             hand = self._actual_hand_left.astype(np.float64)
         else:
             hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
-        offset = (self._pin_offset.astype(np.float64)
-                  if self._pin_offset is not None else np.zeros(3, dtype=np.float64))
+        if self._estimated_pin_position is not None:
+            offset = self._estimated_pin_position[0]
+        else:
+            offset = np.zeros(3, dtype=np.float64)
         estimated_pin_xy = (hand + offset)[:2]
         return float(np.max(np.abs(estimated_pin_xy - np.asarray(mid[:2], dtype=np.float64)))) < CONFIG.pin.insertion.pregrasp_tol
 
@@ -1789,8 +1815,10 @@ class DualAssembly(TrajOptBase):
             hand = self._actual_hand_left.astype(np.float64)
         else:
             hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
-        offset = (self._pin_offset.astype(np.float64)
-                  if self._pin_offset is not None else np.zeros(3, dtype=np.float64))
+        if self._estimated_pin_position is not None:
+            offset = self._estimated_pin_position[0]
+        else:
+            offset = np.zeros(3, dtype=np.float64)
         estimated_pin = hand + offset
         mid_np = np.asarray(mid, dtype=np.float64)
         z_err  = abs(float(estimated_pin[2]) - float(mid_np[2]))

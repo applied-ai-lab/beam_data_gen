@@ -1696,15 +1696,18 @@ class DualAssembly(TrajOptBase):
             return False
         a, b = self._hole_pairs[self._active_hole_pair_idx]
         mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
-        tx, ty = float(mid[0]), float(mid[1])
-        if self._pin_offset is not None:
-            tx -= float(self._pin_offset[0])
-            ty -= float(self._pin_offset[1])
-        target = torch.tensor(
-            [tx, ty, float(mid[2]) + CONFIG.pin.insertion.pregrasp_z_delta],
-            dtype=torch.float32, device=self.params.device,
-        )
-        return float((self._states.left_pose[:2] - target[:2]).abs().max()) < CONFIG.pin.insertion.pregrasp_tol
+        # Gate fires when the *estimated pin* (measured_hand + offset) is
+        # within tolerance of the hole-pair midpoint in xy. Falls back to
+        # the planner pose when no measured FK / offset has been pushed
+        # yet (sim / pre-calibration).
+        if self._actual_hand_left is not None:
+            hand = self._actual_hand_left.astype(np.float64)
+        else:
+            hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
+        offset = (self._pin_offset.astype(np.float64)
+                  if self._pin_offset is not None else np.zeros(3, dtype=np.float64))
+        estimated_pin_xy = (hand + offset)[:2]
+        return float(np.max(np.abs(estimated_pin_xy - np.asarray(mid[:2], dtype=np.float64)))) < CONFIG.pin.insertion.pregrasp_tol
 
     def _check_pin_insert_progress(self) -> bool:
         """Advance / reset the insert hysteresis counter and return True
@@ -1720,14 +1723,20 @@ class DualAssembly(TrajOptBase):
             return False
         a, b = self._hole_pairs[self._active_hole_pair_idx]
         mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
-        # Compare hand pose against the offset-corrected target so the
-        # gate fires when the *pin* reaches the midpoint, not the hand.
-        target_xyz = mid.astype(np.float64).copy()
-        if self._pin_offset is not None:
-            target_xyz = target_xyz - self._pin_offset
-        ee = self._states.left_pose[:3].detach().cpu().numpy()
-        z_err  = abs(float(ee[2]) - float(target_xyz[2]))
-        xy_err = float(np.linalg.norm(ee[:2] - target_xyz[:2]))
+        # Gate fires when the *estimated pin* (measured_hand + offset) is
+        # within tolerance of the hole-pair midpoint in z (primary) and
+        # xy (sanity).  Falls back to the planner pose when no measured
+        # FK / offset has been pushed yet.
+        if self._actual_hand_left is not None:
+            hand = self._actual_hand_left.astype(np.float64)
+        else:
+            hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
+        offset = (self._pin_offset.astype(np.float64)
+                  if self._pin_offset is not None else np.zeros(3, dtype=np.float64))
+        estimated_pin = hand + offset
+        mid_np = np.asarray(mid, dtype=np.float64)
+        z_err  = abs(float(estimated_pin[2]) - float(mid_np[2]))
+        xy_err = float(np.linalg.norm(estimated_pin[:2] - mid_np[:2]))
         if z_err < CONFIG.pin.insertion.z_tol and xy_err < CONFIG.pin.insertion.xy_tol:
             self._pin_insert_counter += 1
         else:

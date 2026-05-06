@@ -104,7 +104,7 @@ class SnapConfig:
 class PinPickupConfig:
     """MOVE_TO_PIN_PREGRASP / DESCEND_TO_PIN."""
     # Hover height above pin during MOVE_TO_PIN_PREGRASP.
-    pregrasp_offset_z: float = 0.08
+    pregrasp_offset_z: float = 0.10
     # Z offset above pin centre at the contact gate.
     grasp_offset_z:    float = 0.01
     # Pregrasp / grasp yaw is forced to 0 during pin pickup —

@@ -1614,7 +1614,7 @@ class DualAssembly(TrajOptBase):
             [pin[0], pin[1], pin[2] + CONFIG.pin.pickup.pregrasp_offset_z],
             dtype=torch.float32, device=self.params.device,
         )
-        return float((self._states.left_pose[:3] - target).abs().max()) < CONFIG.grasp.pregrasp_tol
+        return float((self._states.left_pose[:3] - target).abs().max()) < CONFIG.pin.pickup.pregrasp_tol
 
     def _pin_grasp_contact(self) -> bool:
         if self._active_pin_idx is None or self._pin_positions is None:

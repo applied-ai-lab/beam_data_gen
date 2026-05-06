@@ -105,6 +105,10 @@ class PinPickupConfig:
     """MOVE_TO_PIN_PREGRASP / DESCEND_TO_PIN."""
     # Hover height above pin during MOVE_TO_PIN_PREGRASP.
     pregrasp_offset_z: float = 0.10
+    # Per-axis max |Δx|, |Δy|, |Δz| for the MOVE_TO_PIN_PREGRASP gate to
+    # fire. Decoupled from the beam-phase pregrasp tolerance so pin
+    # pickup can be tightened independently.
+    pregrasp_tol:      float = 0.015
     # Z offset above pin centre at the contact gate.
     grasp_offset_z:    float = 0.01
     # Pregrasp / grasp yaw is forced to 0 during pin pickup —

@@ -178,9 +178,9 @@ class PinOffsetConfig:
     the *pin* (not the hand) lands on the midpoint, compensating for
     the imperfect grasp pose."""
     # Settling cycles before sampling begins.
-    wait_cycles:   int = 3
+    wait_cycles:   int = 10
     # Cycles over which pin↔hand offsets are averaged.
-    sample_cycles: int = 5
+    sample_cycles: int = 15
     # Hand pose held during ROTATE_PIN_INWARD and COMPUTE_PIN_OFFSET.
     rotate_target_x: float = 0.32
     rotate_target_y: float = 0.0

@@ -181,6 +181,11 @@ class PinOffsetConfig:
     rotate_target_x: float = 0.37
     rotate_target_y: float = 0.0
     rotate_target_z: float = 0.93
+    # Maximum allowed Euclidean distance between perceived pin and hand
+    # for a sample to be accepted into the offset average. Rejects bad
+    # detections (latched filtered TFs from the staging area, mirrored
+    # tags) that would otherwise poison the calibration.
+    max_pin_hand_dist: float = 0.05
 
 
 @dataclass(frozen=True)

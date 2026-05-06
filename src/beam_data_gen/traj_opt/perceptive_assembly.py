@@ -1017,7 +1017,12 @@ class DualAssembly(TrajOptBase):
                     pin = np.asarray(self._pin_positions[self._active_pin_idx],
                                      dtype=np.float64)
                     hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
-                    self._pin_offset_samples.append(pin - hand)
+                    # Sanity gate: only accept samples where the perceived
+                    # pin is within max_pin_hand_dist of the hand. Stale or
+                    # mis-associated tag detections can sit metres away and
+                    # would otherwise dominate the mean.
+                    if np.linalg.norm(pin - hand) <= CONFIG.pin.offset.max_pin_hand_dist:
+                        self._pin_offset_samples.append(pin - hand)
                 if step >= wait + n_sample:
                     if self._pin_offset_samples:
                         self._pin_offset = np.mean(

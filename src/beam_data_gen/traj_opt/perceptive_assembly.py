@@ -1097,15 +1097,35 @@ class DualAssembly(TrajOptBase):
             if (not skip_distance) and self._hole_pregrasp_reached():
                 self._goto(State.INSERT_PIN)
             elif (not check_distance_only) and self._state_step >= CONFIG.pin.insertion.pregrasp_timeout_steps:
+
+                a, b = self._hole_pairs[self._active_hole_pair_idx]
+                mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+                cur = self._states.left_pose.detach()
+                x, y = float(mid[0]), float(mid[1])
+                if self._estimated_pin_position is not None:
+                    t_off, _q_off = self._estimated_pin_position
+                    x -= float(t_off[0])
+                    y -= float(t_off[1])
+
                 # Snapshot stuck z, then lift recovery_z_delta above it.
                 self._insertion_recovery_target_z = (
                     float(self._states.left_pose[2])
                     + CONFIG.pin.insertion.recovery_z_delta
                 )
+                self._insertion_recovery_target_x = (
+                    x + np.random.uniform(-10.0,10.0)
+                )
+                self._insertion_recovery_target_y = (
+                    x + np.random.uniform(-10.0,10.0)
+                )
                 self._goto(State.RECOVER_INSERTION_PREGRASP)
 
         elif self._state == State.RECOVER_INSERTION_PREGRASP:
             if (not skip_distance) and self._insertion_recovery_lift_reached():
+                # Reset: 
+                self._insertion_recovery_target_z = None
+                self._insertion_recovery_target_x = None
+                self._insertion_recovery_target_y = None
                 self._goto(State.MOVE_TO_HOLE_PREGRASP)
 
         elif self._state == State.INSERT_PIN:
@@ -1521,7 +1541,7 @@ class DualAssembly(TrajOptBase):
         """
         loss_r = ((self._states.right_pose - self._right_pin_home) ** 2).sum()
         # Slow gradient descent here. We don't care about the movement that much so might as well.
-        self._gradients.right_pose = 0.5*grad(
+        self._gradients.right_pose = 0.25*grad(
             loss_r, self._states.right_pose, retain_graph=True
         )[0]
 
@@ -1534,7 +1554,7 @@ class DualAssembly(TrajOptBase):
 
         # Hard-coded manual slow down on the STOW_AWAY behaviour for safety.
         if self._state==State.STOW_BOTH:
-            g_l /= 1.5 
+            g_l /= 2.0
 
         snap_r = 0.0
         if self._state == State.DESCEND_TO_PIN:
@@ -1625,19 +1645,13 @@ class DualAssembly(TrajOptBase):
             # above the same hole-pair midpoint.
             if self._active_hole_pair_idx is None or self._hole_positions is None:
                 return None
-            a, b = self._hole_pairs[self._active_hole_pair_idx]
-            mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
 
-            cur = self._states.left_pose.detach()
-            target_z = (self._insertion_recovery_target_z
-                        if self._insertion_recovery_target_z is not None
-                        else float(cur[2])+CONFIG.pin.insertion.recovery_z_delta)
-            x, y = float(mid[0]), float(mid[1])
-            if self._estimated_pin_position is not None:
-                t_off, _q_off = self._estimated_pin_position
-                x -= float(t_off[0])
-                y -= float(t_off[1])
-            return _t(x, y, target_z,
+            target_x, target_y, target_z = self._insertion_recovery_target_x, self._insertion_recovery_target_y, self._insertion_recovery_target_z
+
+            if (target_x is None) or (target_y is None) or (target_z is None):
+                raise RuntimeError
+
+            return _t(target_x, target_y, target_z,
                       CONFIG.pin.rotate.inward_yaw_left_sin,
                       CONFIG.pin.rotate.inward_yaw_left_cos)
 

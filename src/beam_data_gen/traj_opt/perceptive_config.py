@@ -25,9 +25,9 @@ from dataclasses import dataclass, field
 class GraspConfig:
     """Gates that fire during MOVE_TO_PREGRASP / DESCENDING."""
     # Per-axis max |Δx|, |Δy|, |Δz| for the pregrasp gate to fire.
-    pregrasp_tol: float = 0.02
+    pregrasp_tol: float = 0.020
     # Per-axis max |Δx|, |Δy|, |Δz| for the grasp-contact gate to fire.
-    grasp_pos_tol: float = 0.013
+    grasp_pos_tol: float = 0.011
 
 
 @dataclass(frozen=True)
@@ -76,12 +76,12 @@ class RecoveryPerturbationConfig:
     re-engage the same near-converged-but-stuck configuration."""
     # Per-arm y-axis displacement (m) applied at state entry. Arms move
     # in opposite directions along y, away from each other.
-    y_delta: float = 0.10
-    x_delta: float = 0.03
+    y_delta: float = 0.15
+    x_delta: float = 0.05
     # Per-arm Euclidean tolerance (m) on reaching the captured target.
     tol: float = 0.02
     # Step budget before the FSM bails to RECOVERY_RELEASE anyway.
-    timeout_steps: int = 20
+    timeout_steps: int = 40
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,7 @@ class GradientConfig:
     # Hard-coded here (instead of read from TrajOptParams.step_size) so
     # the planner's integrator step is fixed by the config rather than
     # by callers.
-    learning_rate: float = 0.25
+    learning_rate: float = 0.28
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,7 @@ class SnapConfig:
     to disable that snap."""
     # Beam phase.
     descent_radius:     float = 0.06   # DESCENDING
-    assemble_radius:    float = 0.03   # DUAL_ASSEMBLE
+    assemble_radius:    float = 0.04   # DUAL_ASSEMBLE
     # Pin phase — independent of beam phase so they can be tuned in
     # isolation.  descent_radius above is reused for DESCEND_TO_PIN.
     pin_pregrasp_radius:  float = 0.05  # MOVE_TO_HOLE_PREGRASP
@@ -152,7 +152,7 @@ class PinInsertionConfig:
     Linear pipeline: success or timeout, both go to RELEASE_PIN.
     There is no slip / recovery branch in pin insertion."""
     # Pre-insertion hover gate (max |Δx|, |Δy|, |Δz|).
-    pregrasp_tol: float = 0.002
+    pregrasp_tol: float = 0.003
     # Hover height for MOVE_TO_HOLE_PREGRASP, expressed as a delta
     # ABOVE the active hole-pair midpoint z (not absolute).  The pin
     # then descends from (mid_xy, mid_z + pregrasp_z_delta) to mid_z
@@ -174,7 +174,9 @@ class PinInsertionConfig:
     # Vertical lift (m) applied during RECOVER_INSERTION_PREGRASP —
     # the EE moves up this far above wherever it was when the
     # MOVE_TO_HOLE_PREGRASP timeout fired, then retries.
-    recovery_z_delta: float = 0.12
+    recovery_z_delta: float = 0.16
+    recovery_x_delta: float = 0.05
+    recovery_y_delta: float = 0.05
 
 
 @dataclass(frozen=True)

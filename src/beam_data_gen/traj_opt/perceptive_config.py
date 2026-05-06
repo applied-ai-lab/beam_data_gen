@@ -27,7 +27,7 @@ class GraspConfig:
     # Per-axis max |Δx|, |Δy|, |Δz| for the pregrasp gate to fire.
     pregrasp_tol: float = 0.020
     # Per-axis max |Δx|, |Δy|, |Δz| for the grasp-contact gate to fire.
-    grasp_pos_tol: float = 0.011
+    grasp_pos_tol: float = 0.010
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class BeamAssembleConfig:
 @dataclass(frozen=True)
 class DescendingConfig:
     """Beam-phase DESCENDING state."""
-    timeout_steps: int = 35
+    timeout_steps: int = 42
 
 
 @dataclass(frozen=True)
@@ -76,12 +76,12 @@ class RecoveryPerturbationConfig:
     re-engage the same near-converged-but-stuck configuration."""
     # Per-arm y-axis displacement (m) applied at state entry. Arms move
     # in opposite directions along y, away from each other.
-    y_delta: float = 0.15
-    x_delta: float = 0.05
+    y_delta: float = 0.16
+    x_delta: float = 0.06
     # Per-arm Euclidean tolerance (m) on reaching the captured target.
     tol: float = 0.02
     # Step budget before the FSM bails to RECOVERY_RELEASE anyway.
-    timeout_steps: int = 40
+    timeout_steps: int = 50
 
 
 @dataclass(frozen=True)
@@ -123,7 +123,7 @@ class PinPickupConfig:
     # Per-axis max |Δx|, |Δy|, |Δz| for the MOVE_TO_PIN_PREGRASP gate to
     # fire. Decoupled from the beam-phase pregrasp tolerance so pin
     # pickup can be tightened independently.
-    pregrasp_tol:      float = 0.015
+    pregrasp_tol:      float = 0.012
     # Z offset above pin centre at the contact gate.
     grasp_offset_z:    float = 0.00
     # Pregrasp / grasp yaw is forced to 0 during pin pickup —
@@ -180,8 +180,6 @@ class PinInsertionConfig:
     # the EE moves up this far above wherever it was when the
     # MOVE_TO_HOLE_PREGRASP timeout fired, then retries.
     recovery_z_delta: float = 0.16
-    recovery_x_delta: float = 0.05
-    recovery_y_delta: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -210,7 +208,7 @@ class PinOffsetConfig:
     # accumulates pin/hand TF samples before pushing the averaged
     # 6-DOF transform.  Longer = more averaging, but COMPUTE_PIN_OFFSET
     # blocks the planner cycle for this long once per pin pickup.
-    calibration_duration: float = 5.0
+    calibration_duration: float = 7.0
     # Maximum allowed Euclidean distance between perceived pin and hand
     # for a sample to be accepted into the calibration average. Rejects
     # stale / mis-associated tag detections that would otherwise poison

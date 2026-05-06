@@ -1126,7 +1126,7 @@ class DualAssembly(TrajOptBase):
 
         elif self._state == State.RETREAT_PIN:
             if (not skip_distance) and self._left_lift_reached():
-                self._goto(State.PICK_PIN)
+                self._goto(State.STOW_BOTH)
                 self._evaluate_idle_transitions()  # → MOVE_TO_PIN_PREGRASP or ALL_DONE
 
         elif self._state == State.PIN_RECOVERY_MOVE_UP:

@@ -208,6 +208,11 @@ class State(IntEnum):
     ALL_DONE               = 25  # terminal: all pins placed
     RECOVER_INSERTION_PREGRASP = 26  # lift recovery_z_delta then retry MOVE_TO_HOLE_PREGRASP
 
+    # Pulls the two arms apart along y by CONFIG.recovery_perturbation.y_delta
+    # before RECOVERY_RELEASE.  Inserted on the DUAL_ASSEMBLE → recovery path
+    # only; gripper stays closed so the beams are physically separated.
+    RECOVERY_PERTURBATION  = 28
+
 
 class PtuView(IntEnum):
     """Desired PTU viewpoint, selected per FSM state.
@@ -451,6 +456,12 @@ class DualAssembly(TrajOptBase):
         # Per-arm gripper command — flipped only by CLOSE_GRIPPER /
         # RELEASE_GRIPPER / RECOVERY_RELEASE. No hysteresis.
         self._gripper_closed: List[bool] = [False, False]
+
+        # ---- RECOVERY_PERTURBATION targets. Captured at state entry from
+        # the current EE pose; cleared on exit. xyz only (orientation held
+        # via gradient on first 3 dims).
+        self._perturbation_target_left:  Optional[torch.Tensor] = None
+        self._perturbation_target_right: Optional[torch.Tensor] = None
 
         # ---- Pin phase bookkeeping (see PERCEPTIVE_ASSEMBLY.MD §10). ----
         # Sized lazily by ``set_pin_positions``.  ``_pin_phase_active`` is a
@@ -979,12 +990,25 @@ class DualAssembly(TrajOptBase):
                     self._slip_counter = 0
                 if self._slip_counter >= CONFIG.beam_assemble.slip_steps:
                     self._slip_counter = 0
-                    self._goto(State.RECOVERY_RELEASE)
-                    self._evaluate_idle_transitions()
+                    self._goto(State.RECOVERY_PERTURBATION)
+                    self._enter_recovery_perturbation()
                     return
                 if self._state_step >= CONFIG.beam_assemble.timeout_steps:
-                    self._goto(State.RECOVERY_RELEASE)
-                    self._evaluate_idle_transitions()
+                    self._goto(State.RECOVERY_PERTURBATION)
+                    self._enter_recovery_perturbation()
+
+        elif self._state == State.RECOVERY_PERTURBATION:
+            # Pull the beams apart in y while the grippers are still closed,
+            # then fall through to RECOVERY_RELEASE.  Time-out gracefully so
+            # a missing target (e.g. enter() not called) cannot stall the FSM.
+            reached = (not skip_distance) and self._perturbation_reached()
+            timed_out = ((not check_distance_only)
+                         and self._state_step >= CONFIG.recovery_perturbation.timeout_steps)
+            if reached or timed_out:
+                self._perturbation_target_left = None
+                self._perturbation_target_right = None
+                self._goto(State.RECOVERY_RELEASE)
+                self._evaluate_idle_transitions()  # opens grippers, → MOVE_UP
 
         elif self._state == State.RECOVERY_MOVE_UP:
             if (not skip_distance) and self._lift_reached():
@@ -1252,6 +1276,8 @@ class DualAssembly(TrajOptBase):
             self._grad_descending()
         elif s == State.DUAL_ASSEMBLE:
             self._grad_dual_assemble()
+        elif s == State.RECOVERY_PERTURBATION:
+            self._grad_recovery_perturbation()
         elif s in (
             State.STOW_BOTH,
             State.MOVE_TO_PIN_PREGRASP,
@@ -1285,6 +1311,38 @@ class DualAssembly(TrajOptBase):
         loss_r = (self._states.right_pose[2]-z_target)**2
         self._gradients.left_pose = grad(loss_l,self._states.left_pose, retain_graph=True)[0]
         self._gradients.right_pose = grad(loss_r,self._states.right_pose, retain_graph=True)[0]
+
+    def _enter_recovery_perturbation(self) -> None:
+        """Capture xyz targets that pull both arms apart along y by
+        ``CONFIG.recovery_perturbation.y_delta``.
+
+        Direction is decided by the entry y-ordering of the two arms — the
+        arm currently at higher y moves further in +y, the other in -y —
+        so the beams always separate regardless of arm-to-beam assignment.
+        """
+        delta = CONFIG.recovery_perturbation.y_delta
+        with torch.no_grad():
+            l_xyz = self._states.left_pose[:3].detach().clone()
+            r_xyz = self._states.right_pose[:3].detach().clone()
+            sign_l = 1.0 if float(l_xyz[1]) >= float(r_xyz[1]) else -1.0
+            l_target = l_xyz.clone()
+            r_target = r_xyz.clone()
+            l_target[1] = l_target[1] + sign_l * delta
+            r_target[1] = r_target[1] - sign_l * delta
+        self._perturbation_target_left  = l_target
+        self._perturbation_target_right = r_target
+
+    def _grad_recovery_perturbation(self) -> None:
+        """Drive each EE xyz to its captured perturbation target."""
+        if (self._perturbation_target_left is None
+                or self._perturbation_target_right is None):
+            return
+        lt = self._perturbation_target_left
+        rt = self._perturbation_target_right
+        loss_l = ((self._states.left_pose[:3]  - lt) ** 2).sum()
+        loss_r = ((self._states.right_pose[:3] - rt) ** 2).sum()
+        self._gradients.left_pose  = grad(loss_l, self._states.left_pose,  retain_graph=True)[0]
+        self._gradients.right_pose = grad(loss_r, self._states.right_pose, retain_graph=True)[0]
 
     def _grad_pregrasp(self) -> None:
         """Pull each arm to its pregrasp pose. Used by MOVE_TO_PREGRASP,
@@ -1751,6 +1809,16 @@ class DualAssembly(TrajOptBase):
         dl = abs(float(self._states.left_pose[2]-CONFIG.move_up.z))
         dr = abs(float(self._states.right_pose[2]-CONFIG.move_up.z))
         return dl < CONFIG.move_up.tol and dr < CONFIG.move_up.tol
+
+    def _perturbation_reached(self) -> bool:
+        if (self._perturbation_target_left is None
+                or self._perturbation_target_right is None):
+            return True
+        with torch.no_grad():
+            dl = float((self._states.left_pose[:3].detach()  - self._perturbation_target_left ).norm())
+            dr = float((self._states.right_pose[:3].detach() - self._perturbation_target_right).norm())
+        tol = CONFIG.recovery_perturbation.tol
+        return dl < tol and dr < tol
 
     def _home_reached(self) -> bool:
         dl = float(((self._states.left_pose[:3]  - self.left_start[:3])  ** 2).sum().sqrt())

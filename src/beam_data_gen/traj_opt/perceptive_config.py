@@ -70,6 +70,20 @@ class MoveUpConfig:
 
 
 @dataclass(frozen=True)
+class RecoveryPerturbationConfig:
+    """RECOVERY_PERTURBATION — pull both arms apart along the y-axis
+    before releasing the grippers, so the next grasp attempt does not
+    re-engage the same near-converged-but-stuck configuration."""
+    # Per-arm y-axis displacement (m) applied at state entry. Arms move
+    # in opposite directions along y, away from each other.
+    y_delta: float = 0.07
+    # Per-arm Euclidean tolerance (m) on reaching the captured target.
+    tol: float = 0.02
+    # Step budget before the FSM bails to RECOVERY_RELEASE anyway.
+    timeout_steps: int = 20
+
+
+@dataclass(frozen=True)
 class GradientConfig:
     """Gradient mixing + integrator step.  Kept identical to
     ``dual_assembly.py`` for behavioural parity in the assembly phase."""
@@ -224,6 +238,7 @@ class PerceptiveConfig:
     descending:     DescendingConfig    = field(default_factory=DescendingConfig)
     go_home:        GoHomeConfig        = field(default_factory=GoHomeConfig)
     move_up:        MoveUpConfig        = field(default_factory=MoveUpConfig)
+    recovery_perturbation: RecoveryPerturbationConfig = field(default_factory=RecoveryPerturbationConfig)
     gradient:       GradientConfig      = field(default_factory=GradientConfig)
     snap:           SnapConfig          = field(default_factory=SnapConfig)
     pin:            PinPhaseConfig      = field(default_factory=PinPhaseConfig)

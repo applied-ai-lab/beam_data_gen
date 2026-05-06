@@ -197,8 +197,9 @@ class State(IntEnum):
     DESCEND_TO_PIN         = 15  # left descends to pin, yaw = 0
     CLOSE_PIN_GRIPPER      = 16  # latch left gripper closed (1 step)
     LIFT_PIN               = 17  # lift pin to CONFIG.move_up.z, yaw = 0
-    ROTATE_PIN_INWARD      = 18  # rotate left wrist 90° inward (toward y = 0)
+    ROTATE_PIN_INWARD      = 18  # rotate left wrist 90° inward AND move EE to rotate_pin_target_xyz
     MOVE_TO_HOLE_PREGRASP  = 19  # left moves over hole-pair midpoint, inward yaw
+    COMPUTE_PIN_OFFSET     = 27  # hold rotate target; sample pin↔hand offset for pregrasp/insertion correction
     INSERT_PIN             = 20  # descend pin into midpoint; 8 mm convergence gate
     RELEASE_PIN            = 21  # latch left gripper open (1 step) on success
     RETREAT_PIN            = 22  # lift to CONFIG.move_up.z then PICK_PIN
@@ -466,6 +467,19 @@ class DualAssembly(TrajOptBase):
         # at the moment MOVE_TO_HOLE_PREGRASP times out so the lift is
         # always ``recovery_z_delta`` above the stuck pose.
         self._insertion_recovery_target_z: Optional[float] = None
+
+        # ---- Pin-offset calibration (COMPUTE_PIN_OFFSET). ----
+        # After the pin is grasped, lifted and rotated inward, the pin tag
+        # leaves the camera FOV.  Before insertion we hold the EE at a
+        # known target where the pin tag is still visible, wait
+        # ``compute_pin_offset_wait_cycles`` cycles for the arm to settle,
+        # then average ``compute_pin_offset_sample_cycles`` observations of
+        # ``pin_world - hand_world``.  The resulting XYZ offset is
+        # subtracted from the hole-midpoint target during
+        # MOVE_TO_HOLE_PREGRASP / INSERT_PIN so the *pin* (not the hand)
+        # lands on the midpoint.  Reset per-pin in ``_enter_pick_pin``.
+        self._pin_offset: Optional[np.ndarray] = None
+        self._pin_offset_samples: List[np.ndarray] = []
 
         # ---- Testing / diagnostics knobs. ----
         # Set step_mode = True to pause at every FSM state transition and wait
@@ -982,8 +996,37 @@ class DualAssembly(TrajOptBase):
                 self._goto(State.ROTATE_PIN_INWARD)
 
         elif self._state == State.ROTATE_PIN_INWARD:
-            if (not skip_distance) and self._pin_yaw_reached():
-                self._goto(State.MOVE_TO_HOLE_PREGRASP)
+            if (not skip_distance) and self._rotate_pin_pose_reached():
+                # Reset accumulators for the new calibration window.
+                self._pin_offset = None
+                self._pin_offset_samples = []
+                self._goto(State.COMPUTE_PIN_OFFSET)
+
+        elif self._state == State.COMPUTE_PIN_OFFSET:
+            # Time-based-only state: hold the rotate target while we wait
+            # for the arm to settle, then average a window of pin↔hand
+            # observations.  Distance gate is unused (gradient producer
+            # keeps the EE on target via _grad_pin_phase).
+            if not check_distance_only:
+                wait = CONFIG.pin.offset.wait_cycles
+                n_sample = CONFIG.pin.offset.sample_cycles
+                step = self._state_step  # incremented at the bottom of this fn
+                if (wait <= step < wait + n_sample
+                        and self._active_pin_idx is not None
+                        and self._pin_positions is not None):
+                    pin = np.asarray(self._pin_positions[self._active_pin_idx],
+                                     dtype=np.float64)
+                    hand = self._states.left_pose[:3].detach().cpu().numpy().astype(np.float64)
+                    self._pin_offset_samples.append(pin - hand)
+                if step >= wait + n_sample:
+                    if self._pin_offset_samples:
+                        self._pin_offset = np.mean(
+                            np.stack(self._pin_offset_samples, axis=0), axis=0)
+                    else:
+                        # No pin observation arrived during the window —
+                        # fall back to zero offset (no correction).
+                        self._pin_offset = np.zeros(3, dtype=np.float64)
+                    self._goto(State.MOVE_TO_HOLE_PREGRASP)
 
         elif self._state == State.MOVE_TO_HOLE_PREGRASP:
             if (not skip_distance) and self._hole_pregrasp_reached():
@@ -1179,6 +1222,7 @@ class DualAssembly(TrajOptBase):
             State.DESCEND_TO_PIN,
             State.LIFT_PIN,
             State.ROTATE_PIN_INWARD,
+            State.COMPUTE_PIN_OFFSET,
             State.MOVE_TO_HOLE_PREGRASP,
             State.INSERT_PIN,
             State.RETREAT_PIN,
@@ -1430,9 +1474,10 @@ class DualAssembly(TrajOptBase):
             cur = self._states.left_pose.detach()
             return _t(cur[0], cur[1], CONFIG.move_up.z, CONFIG.pin.pickup.grasp_yaw_sin, CONFIG.pin.pickup.grasp_yaw_cos)
 
-        if s == State.ROTATE_PIN_INWARD:
-            cur = self._states.left_pose.detach()
-            return _t(cur[0], cur[1], CONFIG.move_up.z,
+        if s in (State.ROTATE_PIN_INWARD, State.COMPUTE_PIN_OFFSET):
+            return _t(CONFIG.pin.offset.rotate_target_x,
+                      CONFIG.pin.offset.rotate_target_y,
+                      CONFIG.pin.offset.rotate_target_z,
                       CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s in (State.MOVE_TO_HOLE_PREGRASP, State.INSERT_PIN, State.RETREAT_PIN):
@@ -1440,13 +1485,21 @@ class DualAssembly(TrajOptBase):
                 return None
             a, b = self._hole_pairs[self._active_hole_pair_idx]
             mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+            x, y = float(mid[0]), float(mid[1])
             if s == State.INSERT_PIN:
                 z = float(mid[2])
             elif s == State.MOVE_TO_HOLE_PREGRASP:
                 z = float(mid[2]) + CONFIG.pin.insertion.pregrasp_z_delta
             else:  # RETREAT_PIN — generic lift to the workspace MOVE_UP_Z.
                 z = CONFIG.move_up.z
-            return _t(mid[0], mid[1], z,
+            # Apply calibrated pin↔hand offset so the *pin* (not the hand)
+            # lands on the hole-pair midpoint.  RETREAT_PIN is a generic
+            # lift and ignores the offset.
+            if s != State.RETREAT_PIN and self._pin_offset is not None:
+                x -= float(self._pin_offset[0])
+                y -= float(self._pin_offset[1])
+                z -= float(self._pin_offset[2])
+            return _t(x, y, z,
                       CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s == State.RECOVER_INSERTION_PREGRASP:
@@ -1463,7 +1516,11 @@ class DualAssembly(TrajOptBase):
             target_z = (self._insertion_recovery_target_z
                         if self._insertion_recovery_target_z is not None
                         else float(cur[2])+CONFIG.pin.insertion.recovery_z_delta)
-            return _t(mid[0], mid[1], target_z,
+            x, y = float(mid[0]), float(mid[1])
+            if self._pin_offset is not None:
+                x -= float(self._pin_offset[0])
+                y -= float(self._pin_offset[1])
+            return _t(x, y, target_z,
                       CONFIG.pin.rotate.inward_yaw_left_sin, CONFIG.pin.rotate.inward_yaw_left_cos)
 
         if s == State.PIN_RECOVERY_MOVE_UP:
@@ -1527,6 +1584,10 @@ class DualAssembly(TrajOptBase):
         self._active_pin_idx, self._active_hole_pair_idx = best
         self._pin_insert_counter = 0
         self._slip_counter = 0
+        # Each new pin needs a fresh calibration — old offset belongs to
+        # the previous (now placed) pin's grasp.
+        self._pin_offset = None
+        self._pin_offset_samples = []
         self._goto(State.MOVE_TO_PIN_PREGRASP)
 
     # ---- Pin-phase gates ----
@@ -1570,6 +1631,22 @@ class DualAssembly(TrajOptBase):
         return (abs(float(self._states.left_pose[2]) - self._insertion_recovery_target_z)
                 < CONFIG.move_up.tol)
 
+    def _rotate_pin_pose_reached(self) -> bool:
+        """Both yaw and EE XYZ within tolerance of ``rotate_pin_target_xyz``.
+
+        Used to advance ROTATE_PIN_INWARD → COMPUTE_PIN_OFFSET only after
+        the arm has actually settled at the calibration pose, so the
+        observed pin↔hand offset reflects the steady-state grasp.
+        """
+        target = torch.tensor(
+            [CONFIG.pin.offset.rotate_target_x,
+             CONFIG.pin.offset.rotate_target_y,
+             CONFIG.pin.offset.rotate_target_z],
+            dtype=torch.float32, device=self.params.device,
+        )
+        d = float((self._states.left_pose[:3] - target).abs().max())
+        return d < CONFIG.move_up.tol and self._pin_yaw_reached()
+
     def _pin_yaw_reached(self) -> bool:
         cur_sin = float(self._states.left_pose[3])
         cur_cos = float(self._states.left_pose[4])
@@ -1583,8 +1660,12 @@ class DualAssembly(TrajOptBase):
             return False
         a, b = self._hole_pairs[self._active_hole_pair_idx]
         mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+        tx, ty = float(mid[0]), float(mid[1])
+        if self._pin_offset is not None:
+            tx -= float(self._pin_offset[0])
+            ty -= float(self._pin_offset[1])
         target = torch.tensor(
-            [mid[0], mid[1], float(mid[2]) + CONFIG.pin.insertion.pregrasp_z_delta],
+            [tx, ty, float(mid[2]) + CONFIG.pin.insertion.pregrasp_z_delta],
             dtype=torch.float32, device=self.params.device,
         )
         return float((self._states.left_pose[:2] - target[:2]).abs().max()) < CONFIG.pin.insertion.pregrasp_tol
@@ -1603,9 +1684,14 @@ class DualAssembly(TrajOptBase):
             return False
         a, b = self._hole_pairs[self._active_hole_pair_idx]
         mid = 0.5 * (self._hole_positions[a] + self._hole_positions[b])
+        # Compare hand pose against the offset-corrected target so the
+        # gate fires when the *pin* reaches the midpoint, not the hand.
+        target_xyz = mid.astype(np.float64).copy()
+        if self._pin_offset is not None:
+            target_xyz = target_xyz - self._pin_offset
         ee = self._states.left_pose[:3].detach().cpu().numpy()
-        z_err  = abs(float(ee[2]) - float(mid[2]))
-        xy_err = float(np.linalg.norm(ee[:2] - mid[:2]))
+        z_err  = abs(float(ee[2]) - float(target_xyz[2]))
+        xy_err = float(np.linalg.norm(ee[:2] - target_xyz[:2]))
         if z_err < CONFIG.pin.insertion.z_tol and xy_err < CONFIG.pin.insertion.xy_tol:
             self._pin_insert_counter += 1
         else:

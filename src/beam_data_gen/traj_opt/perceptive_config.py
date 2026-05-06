@@ -159,6 +159,31 @@ class PinInsertionConfig:
 
 
 @dataclass(frozen=True)
+class PinOffsetConfig:
+    """COMPUTE_PIN_OFFSET — calibrate the pin↔hand XYZ offset before
+    insertion.
+
+    After ROTATE_PIN_INWARD, the hand is held at
+    ``(rotate_target_x, rotate_target_y, rotate_target_z)`` (a pose
+    chosen so the pin AprilTag remains inside the FORWARD camera FOV).
+    The FSM waits ``wait_cycles`` planner cycles for the arm to settle,
+    then averages ``sample_cycles`` observations of
+    ``pin_world − hand_world``.  The resulting constant XYZ offset is
+    subtracted from the hole-pair midpoint during
+    MOVE_TO_HOLE_PREGRASP / INSERT_PIN / RECOVER_INSERTION_PREGRASP so
+    the *pin* (not the hand) lands on the midpoint, compensating for
+    the imperfect grasp pose."""
+    # Settling cycles before sampling begins.
+    wait_cycles:   int = 3
+    # Cycles over which pin↔hand offsets are averaged.
+    sample_cycles: int = 5
+    # Hand pose held during ROTATE_PIN_INWARD and COMPUTE_PIN_OFFSET.
+    rotate_target_x: float = 0.37
+    rotate_target_y: float = 0.0
+    rotate_target_z: float = 0.93
+
+
+@dataclass(frozen=True)
 class PinHomeConfig:
     """Pin-phase home pose (both arms park here at STOW_BOTH).
 
@@ -175,6 +200,7 @@ class PinPhaseConfig:
     pickup:    PinPickupConfig    = field(default_factory=PinPickupConfig)
     rotate:    PinRotateConfig    = field(default_factory=PinRotateConfig)
     insertion: PinInsertionConfig = field(default_factory=PinInsertionConfig)
+    offset:    PinOffsetConfig    = field(default_factory=PinOffsetConfig)
     home:      PinHomeConfig      = field(default_factory=PinHomeConfig)
 
 

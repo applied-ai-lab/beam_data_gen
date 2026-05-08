@@ -1118,10 +1118,10 @@ class DualAssembly(TrajOptBase):
                     + CONFIG.pin.insertion.recovery_z_delta
                 )
                 self._insertion_recovery_target_x = (
-                    x + np.random.uniform(-10.0,10.0)
+                    x + np.random.uniform(-0.10,0.10)
                 )
                 self._insertion_recovery_target_y = (
-                    x + np.random.uniform(-10.0,10.0)
+                    y + np.random.uniform(-0.10,0.10)
                 )
                 self._goto(State.RECOVER_INSERTION_PREGRASP)
 

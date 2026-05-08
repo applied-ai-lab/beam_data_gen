@@ -34,7 +34,7 @@ class GraspConfig:
 class BeamAssembleConfig:
     """DUAL_ASSEMBLE convergence + slip + timeout."""
     # Per-pair Euclidean hole-distance threshold for pair convergence.
-    hole_convergence_threshold: float = 0.005
+    hole_convergence_threshold: float = 0.004
     # Cycles a pair must stay below the threshold before being latched.
     convergence_hysteresis: int = 1
     # Slip detector: EE→beam distance > slip_dist for slip_steps cycles
@@ -157,7 +157,7 @@ class PinInsertionConfig:
     Linear pipeline: success or timeout, both go to RELEASE_PIN.
     There is no slip / recovery branch in pin insertion."""
     # Pre-insertion hover gate (max |Δx|, |Δy|, |Δz|).
-    pregrasp_tol: float = 0.003
+    pregrasp_tol: float = 0.002
     # Hover height for MOVE_TO_HOLE_PREGRASP, expressed as a delta
     # ABOVE the active hole-pair midpoint z (not absolute).  The pin
     # then descends from (mid_xy, mid_z + pregrasp_z_delta) to mid_z
@@ -179,7 +179,7 @@ class PinInsertionConfig:
     # Vertical lift (m) applied during RECOVER_INSERTION_PREGRASP —
     # the EE moves up this far above wherever it was when the
     # MOVE_TO_HOLE_PREGRASP timeout fired, then retries.
-    recovery_z_delta: float = 0.16
+    recovery_z_delta: float = 0.08
 
 
 @dataclass(frozen=True)
